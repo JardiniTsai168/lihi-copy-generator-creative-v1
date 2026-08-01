@@ -5,3 +5,16 @@ node_modules/
 .dev.vars
 .wrangler/
 beck-v1-context.json
+.openclaw/
+.runtime/
+.bridge-url.txt
+.cloudflared-live.yml
+AGENTS.md
+HEARTBEAT.md
+IDENTITY.md
+MEMORY.md
+SOUL.md
+TOOLS.md
+USER.md
+lihi-shared
+memory/

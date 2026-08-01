@@ -1,0 +1,12 @@
+{
+  "name": "lihi-copy-generator-v1",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-07-17",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "COPY_ENGINE_ENDPOINT": "https://lihi-copy.howlihi.com"
+  }
+}

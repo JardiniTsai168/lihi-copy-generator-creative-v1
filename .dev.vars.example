@@ -1,0 +1,5 @@
+COPY_ENGINE_ENDPOINT=https://your-copy-engine.example.com
+COPY_ENGINE_API_KEY=replace-me
+OPENAI_API_KEY=replace-me
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_TIMEOUT_MS=60000

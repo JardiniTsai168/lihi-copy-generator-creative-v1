@@ -4,10 +4,12 @@ const crypto = require("crypto");
 const { execFile } = require("child_process");
 const express = require("express");
 const fs = require("fs/promises");
+const multer = require("multer");
 const os = require("os");
 const path = require("path");
 const { promisify } = require("util");
 const cheerio = require("cheerio");
+const creativeEngine = require("./creative-engine");
 
 const app = express();
 const execFileAsync = promisify(execFile);
@@ -15,10 +17,211 @@ const publicDir = path.join(__dirname, "public");
 
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 3456);
 const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY || "";
-const BRIDGE_ALLOWED_ORIGINS = String(process.env.BRIDGE_ALLOWED_ORIGINS || "")
-  .split(",")
-  .map((value) => value.trim().toLowerCase())
-  .filter(Boolean);
+const DEFAULT_BRIDGE_ALLOWED_ORIGINS = [
+  "https://jardinitsai168.github.io",
+  "https://adsdb.bktsai.link"
+];
+const BRIDGE_ALLOWED_ORIGINS = Array.from(
+  new Set(
+    [
+      ...DEFAULT_BRIDGE_ALLOWED_ORIGINS,
+      ...String(process.env.BRIDGE_ALLOWED_ORIGINS || "")
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+    ]
+  )
+);
+const INTERNAL_PUBLIC_BASE_URL = String(
+  process.env.INTERNAL_PUBLIC_BASE_URL ||
+  process.env.PUBLIC_BASE_URL ||
+  "https://creative.bktsai.link"
+).trim();
+const META_ADS_MCP_SERVER = "https://mcp.facebook.com/ads";
+const META_ADS_MCP_TIMEOUT_MS = Number(process.env.META_ADS_MCP_TIMEOUT_MS || 45000);
+const INTERNAL_PROMPT_VERSION = "v1.0.0";
+const INTERNAL_FILE_SIZE_LIMIT_BYTES = 5 * 1024 * 1024;
+const INTERNAL_PLACEHOLDER_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9p6M6XcAAAAASUVORK5CYII=";
+const INTERNAL_FORMAT_COPY_CHANNELS = ["meta_ad", "google_ads"];
+const INTERNAL_SELECTED_PLATFORM_META = {
+  facebook: { label: "Facebook" },
+  instagram: { label: "Instagram" },
+  threads: { label: "Threads" },
+  google_ads: { label: "Google Ads" }
+};
+const INTERNAL_PLATFORM_DELIVERABLES = {
+  facebook: [
+    { platform: "Facebook", surface: "feed", aspectRatio: "1:1", creativePlatform: "facebook", assetKey: "fb_1x1" },
+    { platform: "Facebook", surface: "feed", aspectRatio: "4:5", creativePlatform: "instagram", assetKey: "fb_4x5" },
+    { platform: "Facebook", surface: "feed", aspectRatio: "1.91:1", creativePlatform: "google_ads", assetKey: "fb_191x1" }
+  ],
+  instagram: [
+    { platform: "Instagram", surface: "feed", aspectRatio: "1:1", creativePlatform: "facebook", assetKey: "ig_1x1" },
+    { platform: "Instagram", surface: "feed", aspectRatio: "4:5", creativePlatform: "instagram", assetKey: "ig_4x5" },
+    { platform: "IG Reels", surface: "reels", aspectRatio: "9:16", creativePlatform: "threads", assetKey: "ig_reels_9x16" },
+    { platform: "IG Stories", surface: "stories", aspectRatio: "9:16", creativePlatform: "threads", assetKey: "ig_stories_9x16" },
+    { platform: "Instagram", surface: "feed", aspectRatio: "1.91:1", creativePlatform: "google_ads", assetKey: "ig_191x1" }
+  ],
+  threads: [
+    { platform: "Threads", surface: "feed", aspectRatio: "1:1", creativePlatform: "facebook", assetKey: "threads_1x1" },
+    { platform: "Threads", surface: "feed", aspectRatio: "4:5", creativePlatform: "instagram", assetKey: "threads_4x5" }
+  ],
+  google_ads: [
+    { platform: "Google Ads", surface: "square", aspectRatio: "1:1", creativePlatform: "facebook", assetKey: "gads_1x1" },
+    { platform: "Google Ads", surface: "landscape", aspectRatio: "1.91:1", creativePlatform: "google_ads", assetKey: "gads_191x1" }
+  ]
+};
+const INTERNAL_REVIEW_CREATIVE_SLOTS = [
+  { creativeId: "creative_001", creativeVersion: "A1" },
+  { creativeId: "creative_002", creativeVersion: "B1" },
+  { creativeId: "creative_003", creativeVersion: "C1" }
+];
+const INTERNAL_REVIEW_TALENT_KEYS = ["none", "adult", "family", "couple", "senior", "staff", "hand"];
+const INTERNAL_OVERRIDE_CREATIVE_STYLE_KEYS = new Set(["clean", "bold", "warm", "luxury", "saas"]);
+const INTERNAL_OVERRIDE_TONE_KEYS = new Set(["brand", "conversion"]);
+const INTERNAL_OVERRIDE_TALENT_KEYS = new Set(INTERNAL_REVIEW_TALENT_KEYS);
+const INTERNAL_REVIEW_STYLE_BEHAVIOR = {
+  home_healing: { creativeStyle: "warm", visualMode: "warm_lifestyle" },
+  sharing_moment: { creativeStyle: "warm", visualMode: "shared_moment" },
+  childhood_memory: { creativeStyle: "warm", visualMode: "memory_story" },
+  premium_brand: { creativeStyle: "luxury", visualMode: "brand_layout" },
+  founder_story: { creativeStyle: "clean", visualMode: "founder_editorial" },
+  social_proof: { creativeStyle: "clean", visualMode: "social_proof" },
+  scenario_solution: { creativeStyle: "bold", visualMode: "benefit_focus" },
+  rational_comparison: { creativeStyle: "saas", visualMode: "comparison_grid" },
+  gift_recommendation: { creativeStyle: "luxury", visualMode: "gift_editorial" },
+  urgency_conversion: { creativeStyle: "bold", visualMode: "conversion_push" }
+};
+const INTERNAL_CREATIVE_PROFILE_PRESETS = {
+  warm_family_dinner_v1: {
+    label: "家庭晚餐暖感版",
+    stylePreset: "home_healing",
+    tone: "brand",
+    voiceBalance: 2,
+    creativeStyle: "warm",
+    talent: "family",
+    variantSelections: {
+      composition: "餐桌感置中構圖",
+      background: "柔白居家背景",
+      lighting: "晨光感自然光"
+    },
+    talentSelections: {
+      grouping: "親子同框",
+      action: "餐桌上共同使用",
+      emotion: "溫暖陪伴",
+      focus: "產品與手部最清楚"
+    }
+  },
+  offer_bold_conversion_v1: {
+    label: "高轉單促購版",
+    stylePreset: "urgency_conversion",
+    tone: "conversion",
+    voiceBalance: 4,
+    creativeStyle: "bold",
+    talent: "adult",
+    variantSelections: {
+      composition: "大字主標 + 側邊產品",
+      background: "亮色漸層背景",
+      textLayout: "下方 CTA 橫條"
+    },
+    talentSelections: {
+      framing: "人物只佔畫面三分之一",
+      action: "拿著產品觀看",
+      emotion: "清爽有精神",
+      styling: "俐落都會感穿搭"
+    }
+  },
+  luxury_editorial_hero_v1: {
+    label: "高級品牌主視覺版",
+    stylePreset: "premium_brand",
+    tone: "brand",
+    voiceBalance: 3,
+    creativeStyle: "luxury",
+    talent: "none",
+    variantSelections: {
+      composition: "置中單品精品構圖",
+      background: "暖白精品棚拍背景",
+      surfaceMaterial: "石材檯面感"
+    },
+    talentSelections: {
+      presence: "純產品主視覺",
+      framing: "產品單獨置中",
+      interaction: "無人物互動",
+      styling: "品牌展示櫥窗感"
+    }
+  },
+  ugc_staff_demo_v1: {
+    label: "專人示範說明版",
+    stylePreset: "scenario_solution",
+    tone: "conversion",
+    voiceBalance: 4,
+    creativeStyle: "clean",
+    talent: "staff",
+    variantSelections: {
+      composition: "左文右圖",
+      background: "純淺色留白背景",
+      textLayout: "左上"
+    },
+    talentSelections: {
+      persona: "產品顧問",
+      action: "指向產品重點",
+      emotion: "親切可信",
+      focus: "人物引導視線到產品"
+    }
+  },
+  senior_trust_story_v1: {
+    label: "熟齡安心信任版",
+    stylePreset: "founder_story",
+    tone: "brand",
+    voiceBalance: 2,
+    creativeStyle: "warm",
+    talent: "senior",
+    variantSelections: {
+      composition: "右情境左文字",
+      background: "淺米牆面背景",
+      lighting: "窗邊側光"
+    },
+    talentSelections: {
+      persona: "熟齡質感女性",
+      action: "拿著產品端詳",
+      emotion: "安心穩定",
+      styling: "高質感中性色服裝"
+    }
+  },
+  couple_gifting_moment_v1: {
+    label: "雙人送禮分享版",
+    stylePreset: "gift_recommendation",
+    tone: "brand",
+    voiceBalance: 2,
+    creativeStyle: "luxury",
+    talent: "couple",
+    variantSelections: {
+      composition: "精品櫥窗式構圖",
+      background: "香檳米色漸層背景",
+      accents: "一個精品感道具"
+    },
+    talentSelections: {
+      grouping: "伴侶自然互動",
+      action: "一人遞給另一人",
+      emotion: "自然熟悉感",
+      focus: "產品在中線主視覺"
+    }
+  }
+};
+const INTERNAL_CREATIVE_PROFILE_KEYS = new Set(Object.keys(INTERNAL_CREATIVE_PROFILE_PRESETS));
+const INTERNAL_UPLOAD_RULES = {
+  logo: {
+    required: true,
+    mimeTypes: new Set(["image/jpeg", "image/png", "image/webp", "image/svg+xml"]),
+    extensions: new Set([".jpg", ".jpeg", ".png", ".webp", ".svg"])
+  },
+  productImage: {
+    required: false,
+    mimeTypes: new Set(["image/jpeg", "image/png", "image/webp"]),
+    extensions: new Set([".jpg", ".jpeg", ".png", ".webp"])
+  }
+};
 const RANDOM_STYLE_PRESET_KEY = "random";
 const STYLE_PRESETS = {
   home_healing: {
@@ -96,17 +299,24 @@ const VISION_ENABLED = process.env.VISION_ENABLED !== "false";
 const BRIDGE_MAX_CONCURRENCY = Number(process.env.BRIDGE_MAX_CONCURRENCY || 2);
 const GENERATE_MAX_CONCURRENCY = Number(process.env.GENERATE_MAX_CONCURRENCY || BRIDGE_MAX_CONCURRENCY);
 const FORMAT_MAX_CONCURRENCY = Number(process.env.FORMAT_MAX_CONCURRENCY || 4);
+const CREATIVE_MAX_CONCURRENCY = Number(process.env.CREATIVE_MAX_CONCURRENCY || 2);
 const PAGE_ANALYSIS_CACHE_TTL_MS = Number(process.env.PAGE_ANALYSIS_CACHE_TTL_MS || 10 * 60 * 1000);
 const RESULT_CACHE_TTL_MS = Number(process.env.RESULT_CACHE_TTL_MS || 15 * 60 * 1000);
 const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES || 200);
 
 const generateQueue = createTaskQueue(GENERATE_MAX_CONCURRENCY);
 const formatQueue = createTaskQueue(FORMAT_MAX_CONCURRENCY);
+const creativeQueue = createTaskQueue(CREATIVE_MAX_CONCURRENCY);
 const pageAnalysisCache = new Map();
 const formatResultCache = new Map();
+const creativeResultCache = new Map();
 const inflightPageAnalysis = new Map();
 const inflightGenerateRequests = new Map();
 const inflightFormatRequests = new Map();
+const inflightCreativeRequests = new Map();
+const internalBatchResults = new Map();
+const internalAssetStore = new Map();
+const internalPlaceholderPngBuffer = Buffer.from(INTERNAL_PLACEHOLDER_PNG_BASE64, "base64");
 const TAIWAN_COMPLIANCE_FORBIDDEN_RULES = [
   { label: "disease_name", pattern: /(糖尿病|高血壓|高血脂|脂肪肝|憂鬱症|失眠症?|骨質疏鬆|胃潰瘍|關節炎|痛風|癌症|中風|阿茲海默症)/i },
   { label: "treatment_claim", pattern: /(治療|治好|根治|預防中風|預防癌症|預防骨折|改善病情|降低血糖|降血糖|降血壓|降低膽固醇|清除血栓|溶解血栓|治療高血脂|治療高血壓|治療糖尿病|治療便秘|治療胃潰瘍|治療氣喘|治療退化性關節炎)/i },
@@ -242,6 +452,22 @@ const SIMPLIFIED_TO_TRADITIONAL_REPLACEMENTS = [
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(publicDir));
 
+const internalUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: INTERNAL_FILE_SIZE_LIMIT_BYTES,
+    files: 2
+  },
+  fileFilter(req, file, callback) {
+    const validationError = validateInternalUploadFile(file);
+    if (validationError) {
+      callback(validationError);
+      return;
+    }
+    callback(null, true);
+  }
+});
+
 app.use((req, res, next) => {
   if (!isProtectedEndpoint(req.path)) {
     return next();
@@ -256,9 +482,10 @@ app.use((req, res, next) => {
     if (origin) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Expose-Headers", "Content-Type, Mcp-Session-Id");
     }
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Mcp-Session-Id");
     return res.status(204).end();
   }
 
@@ -270,6 +497,7 @@ app.use((req, res, next) => {
   if (origin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Type, Mcp-Session-Id");
   }
 
   return next();
@@ -277,6 +505,24 @@ app.use((req, res, next) => {
 
 app.get("/", (_req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
+});
+
+app.get("/assets/:assetName", (req, res, next) => {
+  const assetName = String(req.params.assetName || "").trim();
+  const storedAsset = internalAssetStore.get(assetName);
+  if (storedAsset) {
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.type(storedAsset.mimeType || "application/octet-stream");
+    return res.send(storedAsset.buffer);
+  }
+
+  if (!/^creative_[a-z0-9_.-]+\.(png|svg|webp)$/i.test(assetName)) {
+    return next();
+  }
+
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.type("png");
+  return res.send(internalPlaceholderPngBuffer);
 });
 
 app.get("/health", async (_req, res) => {
@@ -392,6 +638,188 @@ app.post("/format-copy", async (req, res) => {
   }
 });
 
+app.post("/generate-creative", handleGenerateCreative);
+app.post("/api/generate-creative", handleGenerateCreative);
+app.post(
+  "/internal/generate-review",
+  runInternalUploadMiddleware,
+  handleInternalGenerateReview
+);
+app.post("/internal/generate-formats", handleInternalGenerateFormats);
+app.post("/internal/meta-ads-mcp", handleInternalMetaAdsMcpRelay);
+
+async function handleGenerateCreative(req, res) {
+  if (!isAuthorized(req)) {
+    return res.status(401).json({ ok: false, error: "unauthorized" });
+  }
+
+  const input = req.body || {};
+  const cacheKey = buildCreativeCacheKey(input);
+  const cachedResult = !input?.requestNonce ? getCachedValue(creativeResultCache, cacheKey) : null;
+  if (cachedResult) {
+    return res.json(cachedResult);
+  }
+
+  const asset = await getOrCreateInflight(inflightCreativeRequests, cacheKey, async () => {
+    return creativeQueue(async () => creativeEngine.generateCreativeAsset(input));
+  });
+
+  const result = {
+    ok: true,
+    mode: asset.mode || "mock",
+    provider: asset.provider || "bridge-creative-studio",
+    model: asset.imageModel || "",
+    usage: asset.usage || null,
+    warning: asset.warning || "",
+    asset
+  };
+
+  if (!input?.requestNonce) {
+    setCachedValue(creativeResultCache, cacheKey, result, RESULT_CACHE_TTL_MS);
+  }
+
+  return res.json({
+    ...result
+  });
+}
+
+function runInternalUploadMiddleware(req, res, next) {
+  internalUpload.fields([
+    { name: "logo", maxCount: 1 },
+    { name: "productImage", maxCount: 1 }
+  ])(req, res, (error) => {
+    if (!error) {
+      return next();
+    }
+
+    if (error instanceof multer.MulterError) {
+      if (error.code === "LIMIT_FILE_SIZE") {
+        return sendInternalError(res, 413, "FILE_TOO_LARGE", "uploaded file exceeds 5MB limit");
+      }
+      return sendInternalError(res, 400, "INVALID_INPUT", error.message);
+    }
+
+    const statusCode = Number(error.statusCode || error.status || 415);
+    const errorCode = String(error.errorCode || "UNSUPPORTED_MEDIA_TYPE");
+    return sendInternalError(res, statusCode, errorCode, error.message || "unsupported file type");
+  });
+}
+
+async function handleInternalGenerateReview(req, res) {
+  if (!isAuthorized(req)) {
+    return res.status(401).json({
+      error: {
+        code: "UNAUTHORIZED",
+        message: "missing or invalid bearer token"
+      }
+    });
+  }
+
+  const input = normalizeInternalReviewInput(req);
+  const validationError = validateInternalReviewInput(input);
+  if (validationError) {
+    return sendInternalError(res, 400, "INVALID_INPUT", validationError);
+  }
+
+  try {
+    const result = await generateInternalReviewBatch(input, getPublicBaseUrl(req));
+    internalBatchResults.set(result.batchId, result.storedBatch);
+    return res.json(result.payload);
+  } catch (error) {
+    return sendInternalError(res, 500, "GENERATION_FAILED", formatError(error));
+  }
+}
+
+async function handleInternalGenerateFormats(req, res) {
+  if (!isAuthorized(req)) {
+    return res.status(401).json({
+      error: {
+        code: "UNAUTHORIZED",
+        message: "missing or invalid bearer token"
+      }
+    });
+  }
+
+  const input = normalizeInternalFormatsInput(req.body || {});
+  const validationError = validateInternalFormatsInput(input);
+  if (validationError) {
+    return sendInternalError(res, 400, "INVALID_INPUT", validationError);
+  }
+
+  const storedBatch = internalBatchResults.get(input.batchId);
+  if (!storedBatch) {
+    return sendInternalError(res, 400, "INVALID_INPUT", "unknown batchId");
+  }
+
+  const creative = storedBatch.creativesById.get(input.creativeId);
+  if (!creative) {
+    return sendInternalError(res, 400, "INVALID_INPUT", "unknown creativeId");
+  }
+
+  try {
+    const result = await generateInternalFormatsPayload(
+      storedBatch,
+      creative,
+      input.selectedPlatforms,
+      getPublicBaseUrl(req)
+    );
+    return res.json(result);
+  } catch (error) {
+    return sendInternalError(res, 500, "GENERATION_FAILED", formatError(error));
+  }
+}
+
+async function handleInternalMetaAdsMcpRelay(req, res) {
+  if (!isAuthorized(req)) {
+    return res.status(401).json({
+      error: {
+        code: "UNAUTHORIZED",
+        message: "missing or invalid bearer token"
+      }
+    });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), META_ADS_MCP_TIMEOUT_MS);
+
+  try {
+    const upstreamResponse = await fetch(META_ADS_MCP_SERVER, {
+      method: "POST",
+      headers: buildMetaAdsMcpRelayHeaders(req),
+      body: JSON.stringify(req.body || {}),
+      signal: controller.signal
+    });
+
+    const responseText = await upstreamResponse.text();
+    const upstreamContentType = upstreamResponse.headers.get("content-type");
+    const upstreamSessionId = upstreamResponse.headers.get("mcp-session-id");
+
+    if (upstreamContentType) {
+      res.setHeader("Content-Type", upstreamContentType);
+    } else {
+      res.type("application/json");
+    }
+
+    if (upstreamSessionId) {
+      res.setHeader("Mcp-Session-Id", upstreamSessionId);
+    }
+
+    return res.status(upstreamResponse.status).send(responseText);
+  } catch (error) {
+    const isAbortError = error && typeof error === "object" && error.name === "AbortError";
+    return sendInternalError(
+      res,
+      502,
+      isAbortError ? "MCP_TIMEOUT" : "MCP_RELAY_FAILED",
+      isAbortError
+        ? `Meta Ads MCP timed out after ${META_ADS_MCP_TIMEOUT_MS}ms`
+        : `Meta Ads MCP relay failed: ${formatError(error)}`
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function isAuthorized(req) {
   if (!BRIDGE_API_KEY) {
     return true;
@@ -402,15 +830,73 @@ function isAuthorized(req) {
 }
 
 function isProtectedEndpoint(pathname) {
-  return pathname === "/generate-copy" || pathname === "/format-copy";
+  return pathname === "/generate-copy" ||
+    pathname === "/format-copy" ||
+    pathname === "/generate-creative" ||
+    pathname === "/api/generate-creative" ||
+    pathname === "/internal/generate-review" ||
+    pathname === "/internal/generate-formats" ||
+    pathname === "/internal/meta-ads-mcp";
+}
+
+function isInternalEndpoint(pathname) {
+  return pathname === "/internal/generate-review" ||
+    pathname === "/internal/generate-formats" ||
+    pathname === "/internal/meta-ads-mcp";
+}
+
+function buildMetaAdsMcpRelayHeaders(req) {
+  const headers = {
+    Accept: req.get("accept") || "application/json, text/event-stream",
+    "Content-Type": "application/json"
+  };
+  const authorization = req.get("authorization") || "";
+  const mcpSessionId = req.get("mcp-session-id") || "";
+
+  if (authorization) {
+    headers.Authorization = authorization;
+  }
+
+  if (mcpSessionId) {
+    headers["Mcp-Session-Id"] = mcpSessionId;
+  }
+
+  return headers;
 }
 
 function hasAuthorizedBridgeAccess(req) {
+  if (isExplicitlyAllowedInternalOriginRequest(req)) {
+    return true;
+  }
+
   if (BRIDGE_API_KEY) {
     return hasValidBridgeApiKey(req);
   }
 
   return isTrustedLocalBrowserRequest(req);
+}
+
+function isExplicitlyAllowedInternalOriginRequest(req) {
+  if (!isInternalEndpoint(req.path)) {
+    return false;
+  }
+
+  const originHeader = req.get("origin") || "";
+  if (originHeader && isExplicitlyAllowedOrigin(originHeader)) {
+    return true;
+  }
+
+  const refererHeader = req.get("referer") || "";
+  if (!refererHeader) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(refererHeader);
+    return isExplicitlyAllowedOrigin(parsed.origin);
+  } catch {
+    return false;
+  }
 }
 
 function hasValidBridgeApiKey(req) {
@@ -449,13 +935,16 @@ function isExplicitlyAllowedOrigin(originValue) {
 }
 
 function getAllowedRequestOrigin(req) {
-  const hostHeader = cleanHostHeader(req.get("x-forwarded-host") || req.get("host") || "");
-  if (!hostHeader) {
-    return "";
-  }
-
   const originHeader = req.get("origin") || "";
   if (originHeader) {
+    if (isExplicitlyAllowedOrigin(originHeader)) {
+      return originHeader;
+    }
+
+    const hostHeader = cleanHostHeader(req.get("x-forwarded-host") || req.get("host") || "");
+    if (!hostHeader) {
+      return "";
+    }
     return isMatchingOrigin(originHeader, hostHeader) ? originHeader : "";
   }
 
@@ -467,6 +956,14 @@ function getAllowedRequestOrigin(req) {
   try {
     const parsed = new URL(refererHeader);
     const refererOrigin = parsed.origin;
+    if (isExplicitlyAllowedOrigin(refererOrigin)) {
+      return refererOrigin;
+    }
+
+    const hostHeader = cleanHostHeader(req.get("x-forwarded-host") || req.get("host") || "");
+    if (!hostHeader) {
+      return "";
+    }
     return isMatchingOrigin(refererOrigin, hostHeader) ? refererOrigin : "";
   } catch {
     return "";
@@ -549,6 +1046,28 @@ function setCachedValue(cache, key, value, ttlMs) {
   });
 
   pruneCache(cache, CACHE_MAX_ENTRIES);
+}
+
+function buildCreativeCacheKey(input) {
+  const cacheSource = {
+    platform: input?.platform || "",
+    productName: input?.productName || "",
+    productUrl: input?.productUrl || "",
+    primaryCopy: input?.primaryCopy || "",
+    source: {
+      title: input?.source?.title || "",
+      body: input?.source?.body || "",
+      cta: input?.source?.cta || "",
+      benefits: Array.isArray(input?.source?.benefits) ? input.source.benefits : []
+    },
+    config: {
+      style: input?.config?.style || "",
+      talent: input?.config?.talent || input?.config?.model || "",
+      imageModel: input?.config?.imageModel || ""
+    }
+  };
+
+  return crypto.createHash("sha1").update(JSON.stringify(cacheSource)).digest("hex");
 }
 
 function pruneCache(cache, maxEntries) {
@@ -3571,8 +4090,816 @@ function formatError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function sendInternalError(res, statusCode, code, message) {
+  return res.status(statusCode).json({
+    error: {
+      code,
+      message
+    }
+  });
+}
+
+function validateInternalUploadFile(file) {
+  const fieldName = String(file?.fieldname || "").trim();
+  const rules = INTERNAL_UPLOAD_RULES[fieldName];
+  if (!rules) {
+    const error = new Error(`unsupported upload field: ${fieldName || "unknown"}`);
+    error.statusCode = 400;
+    error.errorCode = "INVALID_INPUT";
+    return error;
+  }
+
+  const mimeType = String(file?.mimetype || "").trim().toLowerCase();
+  const extension = path.extname(String(file?.originalname || "")).trim().toLowerCase();
+  if (!rules.mimeTypes.has(mimeType) && !rules.extensions.has(extension)) {
+    const error = new Error(`${fieldName} file format is not supported`);
+    error.statusCode = 415;
+    error.errorCode = "UNSUPPORTED_MEDIA_TYPE";
+    return error;
+  }
+
+  return null;
+}
+
+function normalizeInternalReviewInput(req) {
+  const body = req.body || {};
+  const files = req.files || {};
+  return {
+    productName: normalizeTextField(body.productName),
+    useCaseId: normalizeTextField(body.useCaseId),
+    useCaseTitle: normalizeTextField(body.useCaseTitle),
+    benefitIds: parseStringArrayField(body.benefitIds),
+    benefitTitles: parseStringArrayField(body.benefitTitles),
+    productLink: normalizeTextField(body.productLink),
+    additionalNotes: normalizeTextField(body.additionalNotes),
+    stylePreset: normalizeOptionalStylePreset(body.stylePreset ?? body.style_preset),
+    tone: normalizeOptionalInternalTone(body.tone),
+    voiceBalance: normalizeOptionalVoiceBalance(body.voiceBalance ?? body.voice_balance),
+    creativeProfile: normalizeOptionalCreativeProfile(body.creativeProfile ?? body.creative_profile),
+    creativeStyle: normalizeOptionalCreativeStyle(body.creativeStyle ?? body.creative_style),
+    talent: normalizeOptionalInternalTalent(body.talent ?? body.model),
+    variantSelections: parseSelectionObjectField(body.variantSelections ?? body.variant_selections),
+    talentSelections: parseSelectionObjectField(body.talentSelections ?? body.talent_selections),
+    logo: Array.isArray(files.logo) ? files.logo[0] || null : null,
+    productImage: Array.isArray(files.productImage) ? files.productImage[0] || null : null
+  };
+}
+
+function validateInternalReviewInput(input) {
+  if (!input.productName) {
+    return "productName is required";
+  }
+  if (!input.useCaseId) {
+    return "useCaseId is required";
+  }
+  if (!input.useCaseTitle) {
+    return "useCaseTitle is required";
+  }
+  if (!Array.isArray(input.benefitIds) || input.benefitIds.length === 0) {
+    return "benefitIds must be a non-empty JSON string array";
+  }
+  if (!Array.isArray(input.benefitTitles) || input.benefitTitles.length === 0) {
+    return "benefitTitles must be a non-empty JSON string array";
+  }
+  if (!input.logo) {
+    return "logo file is required";
+  }
+  if (input.productLink && !normalizeExternalUrl(input.productLink)) {
+    return "productLink must be a valid public https URL";
+  }
+  if (input.stylePreset && !(input.stylePreset === RANDOM_STYLE_PRESET_KEY || Object.prototype.hasOwnProperty.call(STYLE_PRESETS, input.stylePreset))) {
+    return "stylePreset is invalid";
+  }
+  if (input.tone && !INTERNAL_OVERRIDE_TONE_KEYS.has(input.tone)) {
+    return "tone is invalid";
+  }
+  if (input.voiceBalance && (!Number.isInteger(input.voiceBalance) || input.voiceBalance < 1 || input.voiceBalance > 5)) {
+    return "voiceBalance is invalid";
+  }
+  if (input.creativeProfile && !INTERNAL_CREATIVE_PROFILE_KEYS.has(input.creativeProfile)) {
+    return "creativeProfile is invalid";
+  }
+  if (input.creativeStyle && !INTERNAL_OVERRIDE_CREATIVE_STYLE_KEYS.has(input.creativeStyle)) {
+    return "creativeStyle is invalid";
+  }
+  if (input.talent && !INTERNAL_OVERRIDE_TALENT_KEYS.has(input.talent)) {
+    return "talent is invalid";
+  }
+  const styleForValidation = input.creativeStyle || resolveInternalCreativeProfilePreset(input.creativeProfile)?.creativeStyle || "clean";
+  const talentForValidation = input.talent || resolveInternalCreativeProfilePreset(input.creativeProfile)?.talent || "none";
+  const variantSelectionError = validateCreativeSelectionValues(
+    input.variantSelections,
+    creativeEngine.getCreativeStyleConfig(styleForValidation)?.variants || {}
+  );
+  if (variantSelectionError) {
+    return `variantSelections ${variantSelectionError}`;
+  }
+  const talentSelectionError = validateCreativeSelectionValues(
+    input.talentSelections,
+    creativeEngine.getCreativeModelConfig(talentForValidation)?.variants || {}
+  );
+  if (talentSelectionError) {
+    return `talentSelections ${talentSelectionError}`;
+  }
+  return "";
+}
+
+function normalizeOptionalStylePreset(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+  return normalized === RANDOM_STYLE_PRESET_KEY || Object.prototype.hasOwnProperty.call(STYLE_PRESETS, normalized)
+    ? normalized
+    : "__invalid__";
+}
+
+function normalizeOptionalInternalTone(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return INTERNAL_OVERRIDE_TONE_KEYS.has(normalized) ? normalized : normalized ? "__invalid__" : "";
+}
+
+function normalizeOptionalVoiceBalance(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  return normalizeVoiceBalance(value);
+}
+
+function normalizeOptionalCreativeProfile(value) {
+  const normalized = String(value || "").trim();
+  return INTERNAL_CREATIVE_PROFILE_KEYS.has(normalized) ? normalized : normalized ? "__invalid__" : "";
+}
+
+function normalizeOptionalCreativeStyle(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return INTERNAL_OVERRIDE_CREATIVE_STYLE_KEYS.has(normalized) ? normalized : normalized ? "__invalid__" : "";
+}
+
+function normalizeOptionalInternalTalent(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return INTERNAL_OVERRIDE_TALENT_KEYS.has(normalized) ? normalized : normalized ? "__invalid__" : "";
+}
+
+function normalizeInternalFormatsInput(input) {
+  return {
+    batchId: normalizeTextField(input.batchId),
+    creativeId: normalizeTextField(input.creativeId),
+    selectedPlatforms: normalizeSelectedPlatforms(input.selectedPlatforms)
+  };
+}
+
+function validateInternalFormatsInput(input) {
+  if (!input.batchId) {
+    return "batchId is required";
+  }
+  if (!input.creativeId) {
+    return "creativeId is required";
+  }
+  if (!Array.isArray(input.selectedPlatforms) || input.selectedPlatforms.length === 0) {
+    return "selectedPlatforms must be a non-empty array";
+  }
+  return "";
+}
+
+function normalizeTextField(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function parseStringArrayField(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseSelectionObjectField(value) {
+  if (!value) {
+    return {};
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, item]) => [String(key || "").trim(), String(item || "").trim()])
+        .filter(([key, item]) => key && item)
+    );
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? Object.fromEntries(
+          Object.entries(parsed)
+            .map(([key, item]) => [String(key || "").trim(), String(item || "").trim()])
+            .filter(([key, item]) => key && item)
+        )
+      : {};
+  } catch {
+    return "__invalid__";
+  }
+}
+
+function validateCreativeSelectionValues(selections, dimensions) {
+  if (selections === "__invalid__") {
+    return "must be a JSON object";
+  }
+  if (!selections || typeof selections !== "object" || Array.isArray(selections)) {
+    return "";
+  }
+  for (const [key, value] of Object.entries(selections)) {
+    const candidates = Array.isArray(dimensions[key]) ? dimensions[key] : null;
+    if (!candidates) {
+      return `contains unsupported key '${key}'`;
+    }
+    if (!candidates.includes(value)) {
+      return `contains unsupported value for '${key}'`;
+    }
+  }
+  return "";
+}
+
+function normalizeSelectedPlatforms(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set();
+  const output = [];
+  for (const item of value) {
+    const key = normalizeSelectedPlatformKey(item);
+    if (!key || !INTERNAL_PLATFORM_DELIVERABLES[key] || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(key);
+  }
+  return output;
+}
+
+function normalizeSelectedPlatformKey(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+
+  const aliases = {
+    facebook: "facebook",
+    instagram: "instagram",
+    threads: "threads",
+    "google ads": "google_ads",
+    google_ads: "google_ads",
+    googleads: "google_ads"
+  };
+
+  return aliases[normalized] || "";
+}
+
+function buildInternalBatchId() {
+  return `batch_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+}
+
+function buildInternalAppliedParameters(input, recipe) {
+  return {
+    benefits: input.benefitTitles.slice(0, 4),
+    stylePreset: recipe.stylePreset,
+    tone: recipe.tone,
+    voiceBalance: recipe.voiceBalance,
+    creativeProfile: recipe.creativeProfile || "",
+    creativeStyle: recipe.creativeStyle,
+    talent: recipe.talent,
+    variantSelections: { ...(recipe.variantSelections || {}) },
+    talentSelections: { ...(recipe.talentSelections || {}) }
+  };
+}
+
+function resolveInternalAppliedRecipe(recipe, appliedConfig) {
+  return {
+    ...recipe,
+    creativeProfile: String(appliedConfig?.creativeProfile || recipe.creativeProfile || "").trim(),
+    creativeStyle: String(appliedConfig?.style || recipe.creativeStyle || "").trim(),
+    talent: String(appliedConfig?.talent || recipe.talent || "").trim(),
+    variantSelections: { ...(appliedConfig?.variantSelections || recipe.variantSelections || {}) },
+    talentSelections: { ...(appliedConfig?.talentSelections || recipe.talentSelections || {}) }
+  };
+}
+
+async function generateInternalReviewBatch(input, baseUrl) {
+  const batchId = buildInternalBatchId();
+  const pageAnalysis = await resolveInternalPageAnalysis(input);
+  const references = buildInternalCreativeReferences(input);
+  const recipes = planInternalReviewRecipes(undefined, input);
+  const records = await Promise.all(
+    recipes.map((recipe) =>
+      generateQueue(async () => generateInternalReviewCreative(batchId, input, recipe, pageAnalysis, references, baseUrl))
+    )
+  );
+
+  return {
+    batchId,
+    payload: {
+      batchId,
+      promptVersion: INTERNAL_PROMPT_VERSION,
+      creatives: records.map((record) => record.response)
+    },
+    storedBatch: {
+      batchId,
+      input,
+      pageAnalysis,
+      references,
+      creativesById: new Map(records.map((record) => [record.response.creativeId, record]))
+    }
+  };
+}
+
+async function generateInternalReviewCreative(batchId, input, recipe, pageAnalysis, references, baseUrl) {
+  const copyInput = buildInternalCopyGenerationInput(input, recipe);
+  const bundle = await generateInternalPrimaryBundle(copyInput, pageAnalysis);
+  const reviewPlatformMeta = creativeEngine.getCreativePlatformMeta("facebook");
+  const { deliverable: squareAsset, appliedConfig } = await createInternalAssetFromCreative({
+    assetName: `${recipe.creativeId}_1x1.png`,
+    creativeBody: {
+      platform: "facebook",
+      productName: input.productName,
+      primaryCopy: [bundle.output.title, bundle.output.body].filter(Boolean).join("\n\n"),
+      source: {
+        title: bundle.output.title,
+        body: bundle.output.body,
+        cta: bundle.output.cta,
+        benefits: bundle.masterDraft.benefitPoints
+      },
+      references,
+      config: {
+        style: recipe.creativeStyle,
+        talent: recipe.talent,
+        creativeProfile: recipe.creativeProfile || "",
+        variantSelections: recipe.variantSelections || {},
+        talentSelections: recipe.talentSelections || {},
+        imageModel: "openai/gpt-5.4-image-2"
+      }
+    },
+    width: reviewPlatformMeta.width,
+    height: reviewPlatformMeta.height,
+    mimeType: "image/png",
+    baseUrl
+  });
+  const resolvedRecipe = resolveInternalAppliedRecipe(recipe, appliedConfig);
+
+  const response = {
+    creativeId: resolvedRecipe.creativeId,
+    creativeVersion: resolvedRecipe.creativeVersion,
+    headline: bundle.output.title || truncateText(bundle.masterDraft.hook || input.productName, 52),
+    kicker: bundle.masterDraft.benefitPoints[0] || input.useCaseTitle,
+    body: bundle.output.body,
+    deliveryNote: buildInternalDeliveryNote(resolvedRecipe, copyInput),
+    creativeProfile: resolvedRecipe.creativeProfile || "",
+    stylePreset: resolvedRecipe.stylePreset,
+    creativeStyle: resolvedRecipe.creativeStyle,
+    talent: resolvedRecipe.talent,
+    tone: resolvedRecipe.tone,
+    voiceBalance: resolvedRecipe.voiceBalance,
+    visualMode: resolvedRecipe.visualMode,
+    copyMode: resolvedRecipe.tone === "conversion" ? "轉單" : "品牌",
+    emotionalIntensity: Math.max(1, Math.min(5, 6 - normalizeVoiceBalance(resolvedRecipe.voiceBalance))),
+    modelSetting: resolvedRecipe.modelSetting,
+    appliedParameters: buildInternalAppliedParameters(input, resolvedRecipe),
+    squareAsset
+  };
+
+  return {
+    response,
+    batchId,
+    recipe: resolvedRecipe,
+    copyInput,
+    masterDraft: bundle.masterDraft,
+    primaryOutput: bundle.output,
+    squareAssetData: squareAsset
+  };
+}
+
+async function generateInternalFormatsPayload(storedBatch, creativeRecord, selectedPlatforms, baseUrl) {
+  const channelOutputs = new Map();
+  for (const channel of INTERNAL_FORMAT_COPY_CHANNELS) {
+    channelOutputs.set(
+      channel,
+      await generateInternalChannelOutput(creativeRecord.masterDraft, {
+        ...creativeRecord.copyInput,
+        channel,
+        masterDraft: creativeRecord.masterDraft
+      })
+    );
+  }
+
+  const deliverableSpecs = expandInternalSelectedPlatforms(selectedPlatforms);
+  const assetDeliverables = await Promise.all(
+    deliverableSpecs.map((spec) =>
+      createInternalFormatDeliverable(storedBatch, creativeRecord, spec, channelOutputs, baseUrl)
+    )
+  );
+
+  return {
+    creativeId: creativeRecord.response.creativeId,
+    appliedParameters: buildInternalAppliedParameters(storedBatch.input, creativeRecord.recipe),
+    copyDeliverables: buildInternalCopyDeliverablesPayload(storedBatch, creativeRecord, channelOutputs),
+    assetDeliverables
+  };
+}
+
+async function createInternalFormatDeliverable(storedBatch, creativeRecord, deliverableSpec, channelOutputs, baseUrl) {
+  const platformMeta = creativeEngine.getCreativePlatformMeta(deliverableSpec.creativePlatform);
+  const channelOutput = deliverableSpec.platform === "Google Ads"
+    ? (channelOutputs.get("google_ads") || creativeRecord.primaryOutput)
+    : (channelOutputs.get("meta_ad") || creativeRecord.primaryOutput);
+  const { deliverable } = await createInternalAssetFromCreative({
+    assetName: `${creativeRecord.response.creativeId}_${deliverableSpec.assetKey}.png`,
+    creativeBody: {
+      platform: deliverableSpec.creativePlatform,
+      productName: storedBatch.input.productName,
+      primaryCopy: buildInternalPrimaryCopyForAsset(channelOutput, creativeRecord.primaryOutput),
+      source: {
+        title: channelOutput.title || creativeRecord.primaryOutput.title,
+        body: channelOutput.body || creativeRecord.primaryOutput.body,
+        cta: channelOutput.cta || creativeRecord.primaryOutput.cta,
+        benefits: creativeRecord.masterDraft.benefitPoints
+      },
+      references: storedBatch.references,
+      config: {
+        style: creativeRecord.recipe.creativeStyle,
+        talent: creativeRecord.recipe.talent,
+        creativeProfile: creativeRecord.recipe.creativeProfile || "",
+        variantSelections: creativeRecord.recipe.variantSelections || {},
+        talentSelections: creativeRecord.recipe.talentSelections || {},
+        imageModel: "openai/gpt-5.4-image-2"
+      }
+    },
+    width: platformMeta.width,
+    height: platformMeta.height,
+    mimeType: "image/png",
+    baseUrl,
+    responseMeta: {
+      platform: deliverableSpec.platform,
+      surface: deliverableSpec.surface,
+      aspectRatio: deliverableSpec.aspectRatio
+    }
+  });
+  return deliverable;
+}
+
+async function createInternalAssetFromCreative({
+  assetName,
+  creativeBody,
+  width,
+  height,
+  mimeType,
+  baseUrl,
+  responseMeta = null
+}) {
+  const asset = await creativeQueue(async () => creativeEngine.generateCreativeAsset(creativeBody));
+  assertInternalCreativeAssetReady(asset, {
+    requireLiveAsset: shouldRequireLiveInternalAsset(baseUrl)
+  });
+  const storedAsset = storeInternalAsset(assetName, asset.imageUrl, asset.mimeType || mimeType);
+
+  return {
+    deliverable: {
+      ...(responseMeta || {}),
+      url: `${baseUrl}/assets/${assetName}`,
+      width,
+      height,
+      mimeType: storedAsset.mimeType
+    },
+    appliedConfig: {
+      creativeProfile: String(asset?.creativeProfile || "").trim(),
+      style: String(asset?.style || "").trim(),
+      talent: String(asset?.talent || "").trim(),
+      variantSelections: { ...(asset?.variantSelections || {}) },
+      talentSelections: { ...(asset?.talentSelections || {}) }
+    }
+  };
+}
+
+function assertInternalCreativeAssetReady(asset, options = {}) {
+  if (!asset?.imageUrl) {
+    throw new Error("creative_asset_missing_image");
+  }
+
+  if (options.requireLiveAsset && asset.mode !== "live") {
+    throw new Error(`creative_asset_generation_failed:${formatError(asset.warning || "creative_image_generation_fell_back")}`);
+  }
+}
+
+function shouldRequireLiveInternalAsset(baseUrl) {
+  try {
+    const parsed = new URL(String(baseUrl || "").trim());
+    return !isLoopbackHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function storeInternalAsset(assetName, dataUrl, fallbackMimeType) {
+  const normalized = decodeDataUrl(dataUrl, fallbackMimeType || "image/png");
+  internalAssetStore.set(assetName, {
+    mimeType: normalized.mimeType,
+    buffer: normalized.buffer,
+    createdAt: Date.now()
+  });
+
+  while (internalAssetStore.size > 200) {
+    const oldestKey = internalAssetStore.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    internalAssetStore.delete(oldestKey);
+  }
+
+  return {
+    mimeType: normalized.mimeType
+  };
+}
+
+function decodeDataUrl(dataUrl, fallbackMimeType) {
+  const raw = String(dataUrl || "").trim();
+  const matched = raw.match(/^data:([^;,]+)?((?:;[^;,=]+=[^;,]+)*)(;base64)?,([\s\S]*)$/i);
+  if (!matched) {
+    return {
+      mimeType: fallbackMimeType || "application/octet-stream",
+      buffer: Buffer.from(raw || "", "utf8")
+    };
+  }
+
+  const mimeType = String(matched[1] || fallbackMimeType || "application/octet-stream").trim();
+  const isBase64 = Boolean(matched[3]);
+  const payload = matched[4] || "";
+  return {
+    mimeType,
+    buffer: isBase64
+      ? Buffer.from(payload, "base64")
+      : Buffer.from(decodeURIComponent(payload), "utf8")
+  };
+}
+
+function buildInternalCopyGenerationInput(input, recipe) {
+  return {
+    productName: input.productName,
+    benefits: input.benefitTitles.slice(0, 4),
+    extraContext: [
+      `useCaseId: ${input.useCaseId}`,
+      `useCaseTitle: ${input.useCaseTitle}`,
+      input.additionalNotes ? `additionalNotes: ${input.additionalNotes}` : "",
+      input.benefitIds.length ? `benefitIds: ${input.benefitIds.join(", ")}` : ""
+    ].filter(Boolean).join("\n"),
+    stylePreset: recipe.stylePreset,
+    productUrl: normalizeExternalUrl(input.productLink) || "https://example.com",
+    tone: recipe.tone,
+    voiceBalance: recipe.voiceBalance,
+    complianceMode: false
+  };
+}
+
+async function generateInternalPrimaryBundle(copyInput, pageAnalysis) {
+  if (!OPENAI_API_KEY) {
+    const masterDraft = buildFallbackMasterDraft(copyInput, pageAnalysis);
+    return {
+      masterDraft,
+      output: formatDraftForChannel(masterDraft, "primary", copyInput.productUrl)
+    };
+  }
+
+  return await generatePrimaryBundleWithFallback(copyInput, pageAnalysis);
+}
+
+async function generateInternalChannelOutput(masterDraft, input) {
+  if (!OPENAI_API_KEY) {
+    return formatDraftForChannel(masterDraft, input.channel, input.productUrl);
+  }
+
+  return await generateChannelCopyWithFallback(masterDraft, input);
+}
+
+async function resolveInternalPageAnalysis(input) {
+  const productUrl = normalizeExternalUrl(input.productLink);
+  if (!productUrl) {
+    return buildInternalSyntheticPageAnalysis(input);
+  }
+
+  try {
+    const pageAnalysis = await analyzeProductPage(productUrl);
+    return mergeInternalPageAnalysis(pageAnalysis, input);
+  } catch {
+    return buildInternalSyntheticPageAnalysis(input);
+  }
+}
+
+function buildInternalSyntheticPageAnalysis(input) {
+  return {
+    ...buildEmptyPageAnalysis(
+      normalizeExternalUrl(input.productLink) || "https://example.com",
+      `${input.productName} 聚焦 ${input.useCaseTitle}，主打 ${input.benefitTitles.join("、")}`
+    ),
+    captureMode: "internal-input",
+    title: input.productName,
+    metaDescription: input.useCaseTitle,
+    bulletPoints: input.benefitTitles.slice(0, 4),
+    paragraphs: [
+      `${input.productName} 這次主要希望先驗證 ${input.useCaseTitle} 這個切角。`,
+      input.additionalNotes || ""
+    ].filter(Boolean)
+  };
+}
+
+function mergeInternalPageAnalysis(pageAnalysis, input) {
+  return {
+    ...pageAnalysis,
+    summary: [
+      `${input.productName} 聚焦 ${input.useCaseTitle}`,
+      pageAnalysis.summary || "",
+      input.additionalNotes || ""
+    ].filter(Boolean).join("｜"),
+    bulletPoints: collectUnique([
+      ...input.benefitTitles,
+      ...(Array.isArray(pageAnalysis.bulletPoints) ? pageAnalysis.bulletPoints : [])
+    ]).slice(0, 8)
+  };
+}
+
+function buildInternalCreativeReferences(input) {
+  return {
+    logo: buildInternalReferenceFromFile(input.logo),
+    product: buildInternalReferenceFromFile(input.productImage)
+  };
+}
+
+function planInternalReviewRecipes(randomFn = Math.random, overrides = {}) {
+  const profilePreset = resolveInternalCreativeProfilePreset(overrides.creativeProfile);
+  const profileKeys = pickDistinctItems(Object.keys(INTERNAL_CREATIVE_PROFILE_PRESETS), INTERNAL_REVIEW_CREATIVE_SLOTS.length, randomFn);
+  const stylePresets = pickDistinctItems(Object.keys(INTERNAL_REVIEW_STYLE_BEHAVIOR), INTERNAL_REVIEW_CREATIVE_SLOTS.length, randomFn);
+  const talents = pickDistinctItems(INTERNAL_REVIEW_TALENT_KEYS, INTERNAL_REVIEW_CREATIVE_SLOTS.length, randomFn);
+  const tones = shuffleArray(["brand", "conversion", randomBoolean(randomFn) ? "brand" : "conversion"], randomFn);
+  const voiceBalances = pickDistinctItems(["1", "2", "3", "4", "5"], INTERNAL_REVIEW_CREATIVE_SLOTS.length, randomFn).map((value) => Number(value));
+
+  return INTERNAL_REVIEW_CREATIVE_SLOTS.map((slot, index) => {
+    const resolvedProfilePreset = profilePreset || resolveInternalCreativeProfilePreset(profileKeys[index]);
+    const stylePreset = overrides.stylePreset || resolvedProfilePreset?.stylePreset || stylePresets[index];
+    const styleBehavior = INTERNAL_REVIEW_STYLE_BEHAVIOR[stylePreset] || INTERNAL_REVIEW_STYLE_BEHAVIOR.home_healing;
+    const talent = overrides.talent || resolvedProfilePreset?.talent || talents[index];
+    const tone = overrides.tone || resolvedProfilePreset?.tone || tones[index];
+    const voiceBalance = overrides.voiceBalance || resolvedProfilePreset?.voiceBalance || voiceBalances[index];
+    const creativeStyle = overrides.creativeStyle || resolvedProfilePreset?.creativeStyle || styleBehavior.creativeStyle;
+    const variantSelections = {
+      ...(resolvedProfilePreset?.variantSelections || {}),
+      ...(overrides.variantSelections || {})
+    };
+    const talentSelections = {
+      ...(resolvedProfilePreset?.talentSelections || {}),
+      ...(overrides.talentSelections || {})
+    };
+
+    return {
+      ...slot,
+      creativeProfile: resolvedProfilePreset?.id || "",
+      stylePreset,
+      tone,
+      voiceBalance,
+      creativeStyle,
+      talent,
+      variantSelections,
+      talentSelections,
+      visualMode: styleBehavior.visualMode,
+      modelSetting: creativeEngine.getCreativeModelLabel(talent)
+    };
+  });
+}
+
+function resolveInternalCreativeProfilePreset(profileKey) {
+  const key = String(profileKey || "").trim();
+  if (!key || !Object.prototype.hasOwnProperty.call(INTERNAL_CREATIVE_PROFILE_PRESETS, key)) {
+    return null;
+  }
+  return {
+    id: key,
+    ...INTERNAL_CREATIVE_PROFILE_PRESETS[key]
+  };
+}
+
+function pickDistinctItems(items, count, randomFn = Math.random) {
+  return shuffleArray(items, randomFn).slice(0, Math.min(count, items.length));
+}
+
+function shuffleArray(items, randomFn = Math.random) {
+  const cloned = Array.isArray(items) ? [...items] : [];
+  for (let index = cloned.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(randomFn() * (index + 1));
+    [cloned[index], cloned[swapIndex]] = [cloned[swapIndex], cloned[index]];
+  }
+  return cloned;
+}
+
+function randomBoolean(randomFn = Math.random) {
+  return randomFn() >= 0.5;
+}
+
+function buildInternalReferenceFromFile(file) {
+  if (!file?.buffer || !file?.mimetype) {
+    return null;
+  }
+
+  return {
+    dataUrl: `data:${file.mimetype};base64,${file.buffer.toString("base64")}`,
+    name: String(file.originalname || "").trim(),
+    mimeType: String(file.mimetype || "").trim()
+  };
+}
+
+function buildInternalDeliveryNote(recipe, copyInput) {
+  return [
+    recipe.creativeProfile && INTERNAL_CREATIVE_PROFILE_PRESETS[recipe.creativeProfile]
+      ? INTERNAL_CREATIVE_PROFILE_PRESETS[recipe.creativeProfile].label
+      : "",
+    getStylePresetMeta(copyInput.stylePreset).label,
+    creativeEngine.getCreativeModelLabel(recipe.talent),
+    getToneLabel(copyInput.tone),
+    getVoiceBalanceInputLabel(copyInput.voiceBalance)
+  ].join("｜");
+}
+
+function expandInternalSelectedPlatforms(selectedPlatforms) {
+  const expanded = [];
+  for (const platformKey of selectedPlatforms) {
+    const specs = INTERNAL_PLATFORM_DELIVERABLES[platformKey];
+    if (!Array.isArray(specs)) {
+      continue;
+    }
+    expanded.push(...specs);
+  }
+  return expanded;
+}
+
+function buildInternalCopyDeliverablesPayload(storedBatch, creativeRecord, channelOutputs) {
+  const metaOutput = channelOutputs.get("meta_ad");
+  const googleAdsOutput = channelOutputs.get("google_ads");
+  const primaryOutput = creativeRecord.primaryOutput;
+  const destinationUrl = resolveSafeOutputUrl(
+    metaOutput?.url || googleAdsOutput?.url || primaryOutput.url || storedBatch.input.productLink,
+    storedBatch.input.productLink || primaryOutput.url || "https://example.com"
+  );
+
+  return {
+    meta_ad: {
+      primaryText: metaOutput?.body || primaryOutput.body,
+      headline: metaOutput?.title || primaryOutput.title,
+      description: metaOutput?.description || storedBatch.input.benefitTitles.slice(0, 2).join("、"),
+      destinationUrl
+    },
+    google_ads: {
+      headline: googleAdsOutput?.title || "",
+      description: googleAdsOutput?.body || "",
+      path1: googleAdsOutput?.description || "",
+      path2: googleAdsOutput?.cta || "",
+      destinationUrl
+    }
+  };
+}
+
+function buildInternalPrimaryCopyForAsset(channelOutput, primaryOutput) {
+  return [
+    channelOutput.title || primaryOutput.title,
+    channelOutput.body || primaryOutput.body,
+    channelOutput.cta || primaryOutput.cta
+  ].filter(Boolean).join("\n\n");
+}
+
+function getPublicBaseUrl(req) {
+  const forwardedProto = normalizeTextField(req.get("x-forwarded-proto"));
+  const forwardedHost = normalizeUrlHostHeader(req.get("x-forwarded-host") || req.get("host") || "");
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  const requestHost = normalizeUrlHostHeader(req.get("host") || "");
+  if (requestHost) {
+    const protocol = req.protocol || "http";
+    return `${protocol}://${requestHost}`;
+  }
+
+  return INTERNAL_PUBLIC_BASE_URL;
+}
+
+function normalizeUrlHostHeader(value) {
+  return String(value || "").trim().toLowerCase().split(",")[0] || "";
 }
 
 if (require.main === module) {
@@ -3583,6 +4910,8 @@ if (require.main === module) {
 
 module.exports = {
   app,
+  buildMetaAdsMcpRelayHeaders,
+  buildCreativeAsset: creativeEngine.buildCreativeAsset,
   cleanHostHeader,
   detectTaiwanComplianceViolations,
   formatEmailOutput,
@@ -3593,18 +4922,30 @@ module.exports = {
   hasAuthorizedBridgeAccess,
   isAllowedPublicUrl,
   isExplicitlyAllowedOrigin,
+  isInternalEndpoint,
   isLoopbackHost,
+  INTERNAL_PROMPT_VERSION,
+  META_ADS_MCP_SERVER,
+  META_ADS_MCP_TIMEOUT_MS,
+  isProtectedEndpoint,
   normalizeTraditionalChineseText,
   normalizeExternalUrl,
+  normalizeSelectedPlatforms,
   normalizeReusableMasterDraft,
   parseChannelCopyOutput,
   parseMasterDraftOutput,
   parsePrimaryBundleOutput,
+  planInternalReviewRecipes,
+  parseStringArrayField,
   resolveStylePresetKey,
   resolveSafeOutputUrl,
+  assertInternalCreativeAssetReady,
   sanitizeChannelOutputForCompliance,
   sanitizeMasterDraftForCompliance,
+  sendInternalError,
   stripReportLikePhrases,
   stripSourceScaffoldingPhrases,
-  summarizePageSignals
+  summarizePageSignals,
+  validateInternalReviewInput,
+  validateInternalUploadFile
 };

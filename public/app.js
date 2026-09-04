@@ -1,8 +1,14 @@
-const APP_VERSION = "2026-07-29-copy-layout-v2";
+const APP_VERSION = "2026-08-24-creative-profile-presets-v1";
 const STORAGE_KEY = `lihi-copy-last-run:${APP_VERSION}`;
 const appConfig = window.APP_CONFIG || {};
 const GENERATE_COPY_TIMEOUT_MS = 120000;
 const FORMAT_COPY_TIMEOUT_MS = 45000;
+const GENERATE_CREATIVE_TIMEOUT_MS = 45000;
+const GENERATE_CREATIVE_SLOW_MODEL_TIMEOUT_MS = 120000;
+const CREATIVE_REFERENCE_MAX_EDGE = 1400;
+const CREATIVE_REFERENCE_MAX_DATA_URL_LENGTH = 1200000;
+const CREATIVE_REFERENCE_INITIAL_QUALITY = 0.9;
+const CREATIVE_REFERENCE_MIN_QUALITY = 0.55;
 const DOMAIN_PRESET_BASES = {
   "copy.bktsai.link": "https://copy.bktsai.link",
   "lihi.io": "https://lihi.io",
@@ -75,6 +81,176 @@ const RANDOM_STYLE_PRESET_META = {
   prompt: "隨機：送出時從既有風格版本中隨機選 1 種。"
 };
 
+const CREATIVE_PLATFORM_META = {
+  facebook: { label: "Facebook 主圖", size: "1:1" },
+  instagram: { label: "IG", size: "4:5" },
+  threads: { label: "Threads", size: "9:16" },
+  google_ads: { label: "Google Ads", size: "1.91:1" }
+};
+
+const CREATIVE_STYLE_META = {
+  clean: "清爽產品感",
+  bold: "高轉換吸睛版",
+  warm: "溫暖生活感",
+  luxury: "高級品牌版",
+  saas: "SaaS 服務版"
+};
+
+const CREATIVE_MODEL_META = {
+  none: "不要模特兒",
+  adult: "生活感模特兒",
+  family: "家庭互動模特兒",
+  couple: "雙人互動模特兒",
+  senior: "熟齡信任模特兒",
+  staff: "專人示範模特兒",
+  hand: "只出現手部互動"
+};
+
+const CREATIVE_PROFILE_PRESETS = {
+  warm_family_dinner_v1: {
+    label: "家庭晚餐暖感版",
+    note: "適合食品、家用品、日常消費品，強調晚餐時刻、分享與被照顧感。",
+    style: "warm",
+    talent: "family",
+    variantSelections: {
+      composition: "餐桌感置中構圖",
+      background: "柔白居家背景"
+    },
+    talentSelections: {
+      framing: "產品在前人物在後",
+      styling: "柔和居家穿搭"
+    }
+  },
+  offer_bold_conversion_v1: {
+    label: "高轉單促購版",
+    note: "適合活動促購、短期轉單、首圖吸睛。畫面會更像 performance ad。",
+    style: "bold",
+    talent: "adult",
+    variantSelections: {
+      composition: "大字主標 + 側邊產品",
+      background: "亮色漸層背景"
+    },
+    talentSelections: {
+      framing: "人物只佔畫面三分之一",
+      styling: "俐落都會感穿搭"
+    }
+  },
+  luxury_editorial_hero_v1: {
+    label: "高級品牌主視覺版",
+    note: "適合 premium 商品、送禮、品牌官網 hero，主打質地與留白。",
+    style: "luxury",
+    talent: "none",
+    variantSelections: {
+      composition: "置中單品精品構圖",
+      background: "暖白精品棚拍背景"
+    },
+    talentSelections: {
+      framing: "產品單獨置中",
+      styling: "品牌展示櫥窗感"
+    }
+  },
+  ugc_staff_demo_v1: {
+    label: "專人示範說明版",
+    note: "適合帶操作感、介紹感、導購感的素材，像有人在幫你看重點。",
+    style: "clean",
+    talent: "staff",
+    variantSelections: {
+      composition: "左文右圖",
+      background: "純淺色留白背景"
+    },
+    talentSelections: {
+      framing: "產品在前人物在後",
+      styling: "俐落工作穿搭"
+    }
+  },
+  senior_trust_story_v1: {
+    label: "熟齡安心信任版",
+    note: "適合保健、食品、居家照護、熟齡客群，畫面會偏安心穩定。",
+    style: "warm",
+    talent: "senior",
+    variantSelections: {
+      composition: "右情境左文字",
+      background: "淺米牆面背景"
+    },
+    talentSelections: {
+      framing: "產品在前人物在後",
+      styling: "高質感中性色服裝"
+    }
+  },
+  couple_gifting_moment_v1: {
+    label: "雙人送禮分享版",
+    note: "適合節慶、送禮、伴侶共用產品，畫面會比較有關係感與體面感。",
+    style: "luxury",
+    talent: "couple",
+    variantSelections: {
+      composition: "精品櫥窗式構圖",
+      background: "香檳米色漸層背景"
+    },
+    talentSelections: {
+      framing: "半身雙人入鏡",
+      styling: "高級生活感服裝"
+    }
+  }
+};
+
+const CREATIVE_STYLE_SELECTION_META = {
+  clean: {
+    composition: ["置中單品 hero", "左文右圖", "右文左圖", "近景產品特寫"],
+    background: ["純淺色留白背景", "柔和漸層背景", "紙張質感背景", "幾何色塊背景"]
+  },
+  bold: {
+    composition: ["大字主標 + 側邊產品", "置中產品 + 上下文案", "左產品右主標", "對角線動態構圖"],
+    background: ["亮色漸層背景", "高彩色塊拼接背景", "對比撞色背景", "速度感光影背景"]
+  },
+  warm: {
+    composition: ["餐桌感置中構圖", "居家角落場景構圖", "左情境右文字", "右情境左文字"],
+    background: ["柔白居家背景", "木質桌面背景", "淺米牆面背景", "暖色生活場景背景"]
+  },
+  luxury: {
+    composition: ["置中單品精品構圖", "左文右產品", "精品櫥窗式構圖", "雜誌封面感上下分區構圖"],
+    background: ["暖白精品棚拍背景", "香檳米色漸層背景", "精品展示檯面", "石材或礦物質感背景"]
+  },
+  saas: {
+    composition: ["置中 dashboard hero", "左文右 UI", "右文左 UI", "workflow step-by-step 分區構圖"],
+    background: ["乾淨淺灰介面背景", "藍白漸層數位背景", "網格數據背景", "低對比工作台背景"]
+  }
+};
+
+const CREATIVE_TALENT_SELECTION_META = {
+  none: {
+    framing: ["產品單獨置中", "產品偏左留文案區", "產品偏右留文案區", "近距離局部特寫"],
+    styling: ["極簡陳列感", "生活靜物感", "商品棚拍感", "品牌展示櫥窗感"]
+  },
+  adult: {
+    framing: ["半身入鏡", "三分之二身入鏡", "人物在後產品在前", "人物只佔畫面三分之一"],
+    styling: ["簡潔日常穿搭", "乾淨居家服裝", "質感中性色服裝", "俐落都會感穿搭"]
+  },
+  family: {
+    framing: ["中景餐桌互動", "半身親密互動", "產品在前人物在後", "帶環境的家庭場景"],
+    styling: ["柔和居家穿搭", "日常家庭服裝", "暖色系親和配色", "舒適休閒穿搭"]
+  },
+  couple: {
+    framing: ["半身雙人入鏡", "中景互動", "產品在前雙人在後", "環境帶入式雙人場景"],
+    styling: ["簡約都會穿搭", "乾淨中性色服裝", "高級生活感服裝", "日常質感休閒"]
+  },
+  senior: {
+    framing: ["半身入鏡", "中景生活場景", "產品在前人物在後", "人物只佔畫面三分之一"],
+    styling: ["簡潔熟齡穿搭", "高質感中性色服裝", "乾淨居家服裝", "日常但體面的穿搭"]
+  },
+  staff: {
+    framing: ["半身示範入鏡", "產品在前人物在後", "側身介紹產品", "人物只佔畫面三分之一"],
+    styling: ["俐落工作穿搭", "品牌感制服元素", "乾淨襯衫或上衣", "中性色門市風格"]
+  },
+  hand: {
+    framing: ["近距離手部特寫", "中景手與產品同框", "桌面上方俯拍手勢", "前景手勢搭配後方產品"],
+    styling: ["乾淨自然手部", "保養感細緻手部", "生活感真實手部", "品牌感簡潔手勢"]
+  }
+};
+
+const CREATIVE_IMAGE_MODEL_META = {
+  "openai/gpt-5.4-image-2": "GPT-5.4 Image 2"
+};
+
 const TAB_LABELS = {
   primary: { title: "標題", body: "主文", description: "", cta: "CTA", url: "連結" },
   meta_ad: { title: "Headline", body: "Primary text", description: "Description", cta: "CTA", url: "連結" },
@@ -129,6 +305,37 @@ const resultCopyButtons = [
   copySmsButton
 ].filter(Boolean);
 const resultTabButtons = Array.from(document.querySelectorAll("[data-tab]"));
+const surfaceTabButtons = Array.from(document.querySelectorAll("[data-surface]"));
+const surfacePanels = Array.from(document.querySelectorAll("[data-surface-panel]"));
+const creativePlatformButtons = Array.from(document.querySelectorAll("[data-creative-platform]"));
+
+const creativePrimaryCopy = document.querySelector("#creative-primary-copy");
+const creativeProfileInput = document.querySelector("#creative-profile");
+const creativeProfileNote = document.querySelector("#creative-profile-note");
+const creativeStyleInput = document.querySelector("#creative-style");
+const creativeModelInput = document.querySelector("#creative-model");
+const creativeCompositionInput = document.querySelector("#creative-composition");
+const creativeBackgroundInput = document.querySelector("#creative-background");
+const creativeFramingInput = document.querySelector("#creative-framing");
+const creativeStylingInput = document.querySelector("#creative-styling");
+const creativeGenerateButton = document.querySelector("#creative-generate-button");
+const creativeStatusEl = document.querySelector("#creative-status");
+const logoImageInput = document.querySelector("#logoImageInput");
+const productImageInput = document.querySelector("#productImageInput");
+const logoPreviewCard = document.querySelector("#logoPreviewCard");
+const productPreviewCard = document.querySelector("#productPreviewCard");
+const logoPreviewImage = document.querySelector("#logoPreviewImage");
+const productPreviewImage = document.querySelector("#productPreviewImage");
+const removeLogoButton = document.querySelector("#removeLogoButton");
+const removeProductButton = document.querySelector("#removeProductButton");
+const creativePreviewCard = document.querySelector("#creative-preview-card");
+const creativeImage = document.querySelector("#creative-image");
+const creativeEmptyState = document.querySelector("#creative-empty-state");
+const creativePromptPreview = document.querySelector("#creative-prompt-preview");
+const creativeSizeBadge = document.querySelector("#creative-size-badge");
+const creativeCostBadge = document.querySelector("#creative-cost-badge");
+const creativeMetaText = document.querySelector("#creative-meta-text");
+const creativeCopyPromptButton = document.querySelector("#creative-copy-prompt-button");
 
 const analysisCard = document.querySelector("#analysis-card");
 const analysisSummary = document.querySelector("#analysis-summary");
@@ -154,9 +361,15 @@ const errorEls = {
 
 let promptRenderTimer = null;
 let activeTab = "primary";
+let activeSurface = "copy";
+let activeCreativePlatform = "facebook";
 let currentRun = null;
 let copyFeedbackTimer = null;
 let activeCopyFeedbackButton = null;
+let creativeReferenceState = {
+  logo: null,
+  product: null
+};
 
 function getFormData() {
   if (!form) {
@@ -178,7 +391,8 @@ function getFormData() {
     productUrl: normalizeProductUrl(formData.get("productUrl"), formData.get("domainPreset")),
     tone: String(formData.get("tone") || "").trim(),
     voiceBalance: normalizeVoiceBalance(formData.get("voiceBalance")),
-    complianceMode: normalizeComplianceMode(formData.get("complianceMode"))
+    complianceMode: normalizeComplianceMode(formData.get("complianceMode")),
+    references: getCreativeReferences()
   };
 }
 
@@ -1064,6 +1278,19 @@ function hydrateFromLastRun() {
       renderPrompt(lastRun.prompt);
     }
   }
+
+  currentRun = normalizeRunState(lastRun);
+  creativeReferenceState = normalizeCreativeReferences(currentRun?.input?.references);
+  renderCreativeReferencePreviews();
+  applyCreativeConfigToControls(currentRun?.creative?.config);
+  syncCreativePrimaryCopy();
+  if (currentRun?.creative?.assets?.[activeCreativePlatform]) {
+    renderCreativeAsset(currentRun.creative.assets[activeCreativePlatform]);
+    unlockCreativePlatformButtons();
+    return;
+  }
+
+  syncCreativePlatformButtonState(false);
 }
 
 function buildRunState(result, input) {
@@ -1078,8 +1305,689 @@ function buildRunState(result, input) {
     masterDraft: result.masterDraft,
     outputs: {
       primary: result.output
+    },
+    creative: {
+      config: null,
+      assets: {}
     }
   };
+}
+
+function normalizeRunState(run) {
+  if (!run || typeof run !== "object") {
+    return null;
+  }
+
+  const normalizedReferences = normalizeCreativeReferences(run.input?.references);
+
+  const storedCreativeConfig = run.creative?.config
+    ? {
+        creativeProfile: String(run.creative.config.creativeProfile || "").trim(),
+        style: run.creative.config.style || "clean",
+        talent: run.creative.config.talent || run.creative.config.model || "none",
+        variantSelections: normalizeCreativeSelectionRecord(run.creative.config.variantSelections),
+        talentSelections: normalizeCreativeSelectionRecord(run.creative.config.talentSelections),
+        imageModel: CREATIVE_IMAGE_MODEL_META[run.creative.config.imageModel]
+          ? run.creative.config.imageModel
+          : "openai/gpt-5.4-image-2"
+      }
+    : null;
+
+  return {
+    ...run,
+    input: {
+      ...(run.input || {}),
+      references: normalizedReferences
+    },
+    creative: {
+      config: storedCreativeConfig,
+      assets: run.creative?.assets || {}
+    }
+  };
+}
+
+function getPrimaryCreativeCopy() {
+  if (!currentRun?.outputs?.primary) {
+    return "";
+  }
+
+  return [currentRun.outputs.primary.title, currentRun.outputs.primary.body]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function normalizeCreativeSelectionRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, item]) => [String(key || "").trim(), String(item || "").trim()])
+      .filter(([key, item]) => key && item)
+  );
+}
+
+function applyCreativeConfigToControls(config = null) {
+  const style = String(config?.style || "clean");
+  const talent = String(config?.talent || config?.model || "none");
+  const creativeProfile = String(config?.creativeProfile || "").trim();
+
+  if (creativeProfileInput) {
+    creativeProfileInput.value = Object.hasOwn(CREATIVE_PROFILE_PRESETS, creativeProfile) ? creativeProfile : "";
+  }
+  if (creativeStyleInput) {
+    creativeStyleInput.value = Object.hasOwn(CREATIVE_STYLE_META, style) ? style : "clean";
+  }
+  if (creativeModelInput) {
+    creativeModelInput.value = Object.hasOwn(CREATIVE_MODEL_META, talent) ? talent : "none";
+  }
+
+  syncCreativeAdvancedOptions({
+    style: creativeStyleInput?.value || "clean",
+    talent: creativeModelInput?.value || "none",
+    variantSelections: normalizeCreativeSelectionRecord(config?.variantSelections),
+    talentSelections: normalizeCreativeSelectionRecord(config?.talentSelections)
+  });
+  updateCreativeProfileNote(creativeProfileInput?.value || "");
+}
+
+function setCreativeSelectionOptions(select, options, selectedValue = "") {
+  if (!(select instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  const normalizedOptions = Array.isArray(options) ? options.filter(Boolean) : [];
+  const targetValue = normalizedOptions.includes(selectedValue) ? selectedValue : "";
+  select.innerHTML = "";
+
+  const autoOption = document.createElement("option");
+  autoOption.value = "";
+  autoOption.textContent = "自動";
+  select.append(autoOption);
+
+  for (const optionLabel of normalizedOptions) {
+    const option = document.createElement("option");
+    option.value = optionLabel;
+    option.textContent = optionLabel;
+    select.append(option);
+  }
+
+  select.value = targetValue;
+}
+
+function syncCreativeAdvancedOptions(config = {}) {
+  const style = String(config?.style || creativeStyleInput?.value || "clean");
+  const talent = String(config?.talent || creativeModelInput?.value || "none");
+  const variantSelections = normalizeCreativeSelectionRecord(config?.variantSelections);
+  const talentSelections = normalizeCreativeSelectionRecord(config?.talentSelections);
+  const styleMeta = CREATIVE_STYLE_SELECTION_META[style] || CREATIVE_STYLE_SELECTION_META.clean;
+  const talentMeta = CREATIVE_TALENT_SELECTION_META[talent] || CREATIVE_TALENT_SELECTION_META.none;
+
+  setCreativeSelectionOptions(creativeCompositionInput, styleMeta.composition, variantSelections.composition || creativeCompositionInput?.value || "");
+  setCreativeSelectionOptions(creativeBackgroundInput, styleMeta.background, variantSelections.background || creativeBackgroundInput?.value || "");
+  setCreativeSelectionOptions(creativeFramingInput, talentMeta.framing, talentSelections.framing || creativeFramingInput?.value || "");
+  setCreativeSelectionOptions(creativeStylingInput, talentMeta.styling, talentSelections.styling || creativeStylingInput?.value || "");
+}
+
+function updateCreativeProfileNote(profileKey) {
+  if (!creativeProfileNote) {
+    return;
+  }
+
+  const preset = CREATIVE_PROFILE_PRESETS[String(profileKey || "").trim()];
+  creativeProfileNote.textContent = preset
+    ? `${preset.label}：${preset.note}`
+    : "先選一個常用配方，底下欄位會一起帶入；之後仍可再手動微調。";
+}
+
+function applyCreativeProfilePreset(profileKey) {
+  const preset = CREATIVE_PROFILE_PRESETS[String(profileKey || "").trim()];
+  if (!preset) {
+    syncCreativeAdvancedOptions();
+    updateCreativeProfileNote("");
+    return;
+  }
+
+  if (creativeStyleInput) {
+    creativeStyleInput.value = preset.style;
+  }
+  if (creativeModelInput) {
+    creativeModelInput.value = preset.talent;
+  }
+
+  syncCreativeAdvancedOptions({
+    style: preset.style,
+    talent: preset.talent,
+    variantSelections: preset.variantSelections,
+    talentSelections: preset.talentSelections
+  });
+  updateCreativeProfileNote(profileKey);
+}
+
+function syncCreativePrimaryCopy() {
+  if (!(creativePrimaryCopy instanceof HTMLTextAreaElement)) {
+    return;
+  }
+
+  creativePrimaryCopy.value = getPrimaryCreativeCopy();
+}
+
+function setActiveSurface(surface) {
+  activeSurface = surface === "creative" ? "creative" : "copy";
+
+  surfaceTabButtons.forEach((button) => {
+    const isActive = button.dataset.surface === activeSurface;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+
+  surfacePanels.forEach((panel) => {
+    const isActive = panel.getAttribute("data-surface-panel") === activeSurface;
+    panel.classList.toggle("is-hidden", !isActive);
+  });
+
+  if (activeSurface === "creative") {
+    syncCreativePrimaryCopy();
+    syncCreativePlatformButtonState(false);
+  }
+}
+
+function getCreativeConfig() {
+  const variantSelections = {};
+  const talentSelections = {};
+
+  if (creativeCompositionInput?.value) {
+    variantSelections.composition = String(creativeCompositionInput.value);
+  }
+  if (creativeBackgroundInput?.value) {
+    variantSelections.background = String(creativeBackgroundInput.value);
+  }
+  if (creativeFramingInput?.value) {
+    talentSelections.framing = String(creativeFramingInput.value);
+  }
+  if (creativeStylingInput?.value) {
+    talentSelections.styling = String(creativeStylingInput.value);
+  }
+
+  return {
+    creativeProfile: String(creativeProfileInput?.value || "").trim(),
+    style: String(creativeStyleInput?.value || "clean"),
+    talent: String(creativeModelInput?.value || "none"),
+    variantSelections,
+    talentSelections,
+    imageModel: "openai/gpt-5.4-image-2"
+  };
+}
+
+function normalizeCreativeReferences(value) {
+  const references = value && typeof value === "object" ? value : {};
+  return {
+    logo: normalizeCreativeReferenceAsset(references.logo),
+    product: normalizeCreativeReferenceAsset(references.product)
+  };
+}
+
+function normalizeCreativeReferenceAsset(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const dataUrl = String(value.dataUrl || "").trim();
+  if (!dataUrl) {
+    return null;
+  }
+
+  return {
+    dataUrl,
+    name: String(value.name || "").trim(),
+    mimeType: String(value.mimeType || "").trim()
+  };
+}
+
+function getCreativeReferences() {
+  return normalizeCreativeReferences(creativeReferenceState);
+}
+
+function getCreativeTimeoutMs(config = {}) {
+  const imageModel = String(config?.imageModel || "openai/gpt-5.4-image-2");
+  if (imageModel.startsWith("openai/gpt-5")) {
+    return GENERATE_CREATIVE_SLOW_MODEL_TIMEOUT_MS;
+  }
+
+  return GENERATE_CREATIVE_TIMEOUT_MS;
+}
+
+function buildCreativeRequest(platform = activeCreativePlatform, options = {}) {
+  const { forceRegenerate = false } = options;
+  const config = getCreativeConfig();
+  const references = getCreativeReferences();
+  syncCurrentRunReferences(references);
+  return {
+    platform,
+    requestNonce: forceRegenerate ? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` : "",
+    config: {
+      ...config,
+      model: config.talent
+    },
+    productName: currentRun?.input?.productName || "",
+    productUrl: currentRun?.input?.productUrl || "",
+    primaryCopy: getPrimaryCreativeCopy(),
+    references,
+    source: {
+      title: currentRun?.outputs?.primary?.title || "",
+      body: currentRun?.outputs?.primary?.body || "",
+      cta: currentRun?.outputs?.primary?.cta || "",
+      benefits: currentRun?.input?.benefits || []
+    }
+  };
+}
+
+function syncCurrentRunReferences(references = getCreativeReferences()) {
+  if (!currentRun || typeof currentRun !== "object") {
+    return;
+  }
+
+  currentRun.input = {
+    ...(currentRun.input || {}),
+    references: normalizeCreativeReferences(references)
+  };
+}
+
+function setCreativeStatus(message) {
+  if (creativeStatusEl) {
+    creativeStatusEl.textContent = message;
+  }
+}
+
+function hasPrimaryCreativeAsset() {
+  return Boolean(currentRun?.creative?.assets?.facebook);
+}
+
+function syncCreativePlatformButtonState(isLoading = false) {
+  const shouldDisable = isLoading || !hasPrimaryCreativeAsset();
+  creativePlatformButtons.forEach((button) => {
+    button.disabled = shouldDisable;
+  });
+}
+
+function setCreativeLoadingState(isLoading) {
+  if (creativeGenerateButton) {
+    creativeGenerateButton.disabled = isLoading;
+  }
+
+  syncCreativePlatformButtonState(isLoading);
+}
+
+function unlockCreativePlatformButtons() {
+  syncCreativePlatformButtonState(false);
+}
+
+function setActiveCreativePlatform(platform, options = {}) {
+  const { render = true } = options;
+  activeCreativePlatform = CREATIVE_PLATFORM_META[platform] ? platform : "facebook";
+
+  creativePlatformButtons.forEach((button) => {
+    const isActive = button.dataset.creativePlatform === activeCreativePlatform;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+
+  if (!render) {
+    return;
+  }
+
+  const asset = currentRun?.creative?.assets?.[activeCreativePlatform];
+  if (asset) {
+    renderCreativeAsset(asset);
+    return;
+  }
+
+  renderCreativeEmptyState();
+}
+
+function getCreativeMetaText(asset) {
+  const profileKey = asset?.creativeProfile || currentRun?.creative?.config?.creativeProfile || "";
+  const profileLabel = CREATIVE_PROFILE_PRESETS[profileKey]?.label || "";
+  const styleLabel = CREATIVE_STYLE_META[asset?.style] || asset?.style || "";
+  const talentLabel = CREATIVE_MODEL_META[asset?.talent || asset?.model] || asset?.talent || asset?.model || "";
+  const imageModelLabel = CREATIVE_IMAGE_MODEL_META[asset?.imageModel] || asset?.imageModel || "";
+  return [profileLabel, styleLabel, talentLabel, imageModelLabel, asset?.platformLabel].filter(Boolean).join("｜") || "尚未產出素材";
+}
+
+function findFirstNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  for (const key of [
+    "cost",
+    "usd",
+    "amount",
+    "estimated_cost",
+    "total_cost",
+    "cost_usd",
+    "usd_cost"
+  ]) {
+    const nested = findFirstNumber(value[key]);
+    if (nested !== null) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function getUsageTokenCount(usage, keys) {
+  for (const key of keys) {
+    const count = findFirstNumber(usage?.[key]);
+    if (count !== null) {
+      return count;
+    }
+  }
+  return 0;
+}
+
+function estimateCreativeCostUsd(asset) {
+  const explicitCost = findFirstNumber(asset?.usage);
+  if (explicitCost !== null) {
+    return explicitCost;
+  }
+
+  if (asset?.imageModel === "openai/gpt-5.4-image-2") {
+    const usage = asset?.usage || {};
+    const inputTokens = getUsageTokenCount(usage, ["input_tokens", "prompt_tokens"]);
+    const outputTokens = getUsageTokenCount(usage, ["output_tokens", "completion_tokens"]);
+    const inputCost = (inputTokens / 1000000) * 8;
+    const outputCost = (outputTokens / 1000000) * 15;
+    const totalCost = inputCost + outputCost;
+    return totalCost > 0 ? totalCost : null;
+  }
+
+  return null;
+}
+
+function formatCreativeCostLabel(asset) {
+  const costUsd = estimateCreativeCostUsd(asset);
+  if (costUsd === null) {
+    return "USD --";
+  }
+
+  return `USD ${costUsd.toFixed(4)}`;
+}
+
+function renderCreativeEmptyState() {
+  if (creativePreviewCard) {
+    creativePreviewCard.classList.add("empty");
+  }
+  if (creativeImage) {
+    creativeImage.classList.add("is-hidden");
+    creativeImage.removeAttribute("src");
+  }
+  if (creativeEmptyState) {
+    creativeEmptyState.classList.remove("is-hidden");
+    creativeEmptyState.innerHTML = "<strong>這裡會出現素材預覽</strong><p>第一步先產 Facebook 主圖，之後下方 tab 就能延伸其他尺寸。</p>";
+  }
+  if (creativePromptPreview) {
+    creativePromptPreview.textContent = "尚未產生素材 prompt。";
+  }
+  if (creativeSizeBadge) {
+    creativeSizeBadge.textContent = CREATIVE_PLATFORM_META[activeCreativePlatform]?.size || "1:1";
+  }
+  if (creativeMetaText) {
+    creativeMetaText.textContent = "尚未產出素材";
+  }
+  if (creativeCostBadge) {
+    creativeCostBadge.textContent = "USD --";
+  }
+  if (creativeCopyPromptButton) {
+    creativeCopyPromptButton.disabled = true;
+  }
+}
+
+function renderCreativeLoadingState(platform = activeCreativePlatform) {
+  const platformSize = CREATIVE_PLATFORM_META[platform]?.size || "1:1";
+
+  if (creativePreviewCard) {
+    creativePreviewCard.classList.add("empty");
+  }
+  if (creativeImage) {
+    creativeImage.classList.add("is-hidden");
+    creativeImage.removeAttribute("src");
+  }
+  if (creativeEmptyState) {
+    creativeEmptyState.classList.remove("is-hidden");
+    creativeEmptyState.innerHTML = "<strong>產圖中</strong><p>正在整理這個比例的素材設定與 prompt。</p>";
+  }
+  if (creativePromptPreview) {
+    creativePromptPreview.textContent = "產圖中...";
+    creativePromptPreview.dataset.copyValue = "";
+  }
+  if (creativeSizeBadge) {
+    creativeSizeBadge.textContent = platformSize;
+  }
+  if (creativeMetaText) {
+    creativeMetaText.textContent = "產圖中";
+  }
+  if (creativeCostBadge) {
+    creativeCostBadge.textContent = "USD --";
+  }
+  if (creativeCopyPromptButton) {
+    creativeCopyPromptButton.disabled = true;
+  }
+}
+
+function renderCreativeAsset(asset) {
+  if (!asset) {
+    renderCreativeEmptyState();
+    return;
+  }
+
+  if (creativePreviewCard) {
+    creativePreviewCard.classList.remove("empty");
+  }
+  if (creativeImage) {
+    creativeImage.src = asset.imageUrl;
+    creativeImage.alt = asset.alt || "AI 廣告素材預覽";
+    creativeImage.classList.remove("is-hidden");
+  }
+  if (creativeEmptyState) {
+    creativeEmptyState.classList.add("is-hidden");
+  }
+  if (creativePromptPreview) {
+    creativePromptPreview.textContent = asset.prompt || "尚未產生素材 prompt。";
+    creativePromptPreview.dataset.copyValue = asset.prompt || "";
+  }
+  if (creativeSizeBadge) {
+    creativeSizeBadge.textContent = CREATIVE_PLATFORM_META[asset.platform]?.size || "1:1";
+  }
+  if (creativeCostBadge) {
+    creativeCostBadge.textContent = formatCreativeCostLabel(asset);
+  }
+  if (creativeMetaText) {
+    creativeMetaText.textContent = getCreativeMetaText(asset);
+  }
+  if (creativeCopyPromptButton) {
+    creativeCopyPromptButton.disabled = !asset.prompt;
+  }
+}
+
+function creativeConfigMatchesStored(config) {
+  const stored = currentRun?.creative?.config;
+  const storedVariantSelections = normalizeCreativeSelectionRecord(stored?.variantSelections);
+  const storedTalentSelections = normalizeCreativeSelectionRecord(stored?.talentSelections);
+  const nextVariantSelections = normalizeCreativeSelectionRecord(config?.variantSelections);
+  const nextTalentSelections = normalizeCreativeSelectionRecord(config?.talentSelections);
+  return !!stored &&
+    stored.creativeProfile === String(config.creativeProfile || "") &&
+    stored.style === config.style &&
+    stored.talent === config.talent &&
+    JSON.stringify(storedVariantSelections) === JSON.stringify(nextVariantSelections) &&
+    JSON.stringify(storedTalentSelections) === JSON.stringify(nextTalentSelections) &&
+    stored.imageModel === config.imageModel;
+}
+
+function renderCreativeReferencePreviews() {
+  renderCreativeReferencePreview("logo", logoPreviewCard, logoPreviewImage);
+  renderCreativeReferencePreview("product", productPreviewCard, productPreviewImage);
+}
+
+function renderCreativeReferencePreview(kind, card, image) {
+  const asset = creativeReferenceState[kind];
+  const hasAsset = Boolean(asset?.dataUrl);
+
+  if (card) {
+    card.classList.toggle("is-hidden", !hasAsset);
+  }
+
+  if (image instanceof HTMLImageElement) {
+    if (hasAsset) {
+      image.src = asset.dataUrl;
+    } else {
+      image.removeAttribute("src");
+    }
+  }
+}
+
+async function handleCreativeReferenceInputChange(kind, event) {
+  const input = event?.target instanceof HTMLInputElement ? event.target : null;
+  const file = input?.files?.[0];
+
+  if (!file) {
+    return;
+  }
+
+  try {
+    const asset = await fileToCreativeReferenceAsset(file);
+    creativeReferenceState = {
+      ...creativeReferenceState,
+      [kind]: asset
+    };
+    syncCurrentRunReferences();
+    if (currentRun) {
+      saveLastRun(currentRun);
+    }
+    renderCreativeReferencePreviews();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "上傳圖片失敗";
+    if (activeSurface === "creative") {
+      setCreativeStatus(message);
+    } else if (statusEl) {
+      statusEl.textContent = message;
+    }
+    resetCreativeReferenceInput(kind);
+  }
+}
+
+function handleRemoveCreativeReference(kind) {
+  creativeReferenceState = {
+    ...creativeReferenceState,
+    [kind]: null
+  };
+  resetCreativeReferenceInput(kind);
+  syncCurrentRunReferences();
+  if (currentRun) {
+    saveLastRun(currentRun);
+  }
+  renderCreativeReferencePreviews();
+}
+
+function resetCreativeReferenceInput(kind) {
+  const input = kind === "logo" ? logoImageInput : productImageInput;
+  if (input instanceof HTMLInputElement) {
+    input.value = "";
+  }
+}
+
+async function fileToCreativeReferenceAsset(file) {
+  const mimeType = String(file.type || "").toLowerCase();
+  if (!mimeType.startsWith("image/")) {
+    throw new Error("請上傳圖片檔");
+  }
+
+  const dataUrl = mimeType === "image/svg+xml"
+    ? await readFileAsDataUrl(file)
+    : await fileToCompressedReferenceDataUrl(file);
+
+  return {
+    name: String(file.name || "").trim(),
+    mimeType: mimeType || "image/webp",
+    dataUrl
+  };
+}
+
+async function fileToCompressedReferenceDataUrl(file) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const { width, height } = fitWithinBounds(
+    image.naturalWidth || image.width || CREATIVE_REFERENCE_MAX_EDGE,
+    image.naturalHeight || image.height || CREATIVE_REFERENCE_MAX_EDGE,
+    CREATIVE_REFERENCE_MAX_EDGE
+  );
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  if (!ctx) {
+    throw new Error("瀏覽器不支援圖片處理");
+  }
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+
+  let quality = CREATIVE_REFERENCE_INITIAL_QUALITY;
+  let compressedDataUrl = canvas.toDataURL("image/webp", quality);
+
+  while (compressedDataUrl.length > CREATIVE_REFERENCE_MAX_DATA_URL_LENGTH && quality > CREATIVE_REFERENCE_MIN_QUALITY) {
+    quality = Math.max(CREATIVE_REFERENCE_MIN_QUALITY, quality - 0.08);
+    compressedDataUrl = canvas.toDataURL("image/webp", quality);
+  }
+
+  if (compressedDataUrl.length > CREATIVE_REFERENCE_MAX_DATA_URL_LENGTH) {
+    throw new Error("圖片檔案太大，請先裁切或縮小後再上傳");
+  }
+
+  return compressedDataUrl;
+}
+
+function fitWithinBounds(width, height, maxEdge) {
+  if (width <= maxEdge && height <= maxEdge) {
+    return { width, height };
+  }
+
+  const ratio = width / height;
+  if (ratio >= 1) {
+    return { width: maxEdge, height: Math.round(maxEdge / ratio) };
+  }
+
+  return { width: Math.round(maxEdge * ratio), height: maxEdge };
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("讀取圖片失敗"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("載入圖片失敗"));
+    image.src = src;
+  });
 }
 
 async function checkHealth() {
@@ -1131,6 +2039,7 @@ async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 30000) {
 
 async function handleSubmit(event) {
   event.preventDefault();
+  setActiveSurface("copy");
 
   const data = getFormData();
   const errors = validate(data);
@@ -1147,6 +2056,7 @@ async function handleSubmit(event) {
   currentRun = null;
   setActiveTab("primary");
   renderEmptyResult("primary");
+  renderCreativeEmptyState();
   setTabLoadingState(true);
 
   if (form) {
@@ -1164,12 +2074,23 @@ async function handleSubmit(event) {
   }
 
   try {
+    const copyRequest = {
+      productName: data.productName,
+      benefits: data.benefits,
+      extraContext: data.extraContext,
+      stylePreset: data.stylePreset,
+      domainPreset: data.domainPreset,
+      productUrl: data.productUrl,
+      tone: data.tone,
+      voiceBalance: data.voiceBalance,
+      complianceMode: data.complianceMode
+    };
     const { response, result } = await fetchJsonWithTimeout(
       getApiUrl("generate-copy"),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
+        body: JSON.stringify(copyRequest)
       },
       GENERATE_COPY_TIMEOUT_MS
     );
@@ -1180,6 +2101,7 @@ async function handleSubmit(event) {
 
     currentRun = buildRunState(result, data);
     renderResult(currentRun.outputs.primary);
+    syncCreativePrimaryCopy();
     renderPageAnalysis(result.pageAnalysis);
     renderPrompt(result.prompt);
     saveLastRun(currentRun);
@@ -1202,10 +2124,15 @@ async function handleSubmit(event) {
       },
       outputs: {
         primary: fallback
+      },
+      creative: {
+        config: null,
+        assets: {}
       }
     };
 
     renderResult(fallback);
+    syncCreativePrimaryCopy();
     clearPageAnalysis();
     renderPrompt(currentRun.prompt);
     saveLastRun(currentRun);
@@ -1296,6 +2223,79 @@ async function handleTabClick(tab) {
   } finally {
     setTabLoadingState(false);
   }
+}
+
+async function requestCreativeAsset(platform = activeCreativePlatform, options = {}) {
+  const { forceRegenerate = false } = options;
+
+  if (!currentRun?.outputs?.primary) {
+    setCreativeStatus("請先產出主要文案。");
+    renderCreativeEmptyState();
+    return;
+  }
+
+  const config = getCreativeConfig();
+  const hasExisting =
+    !forceRegenerate &&
+    currentRun?.creative?.assets?.[platform] &&
+    creativeConfigMatchesStored(config);
+  if (hasExisting) {
+    renderCreativeAsset(currentRun.creative.assets[platform]);
+    setCreativeStatus(`${CREATIVE_PLATFORM_META[platform]?.label || "素材"} 已就緒。`);
+    return;
+  }
+
+  renderCreativeLoadingState(platform);
+  setCreativeLoadingState(true);
+  setCreativeStatus(`正在產出 ${CREATIVE_PLATFORM_META[platform]?.label || "素材"}...`);
+
+  try {
+    const timeoutMs = getCreativeTimeoutMs(config);
+    const { response, result } = await fetchJsonWithTimeout(
+      getApiUrl("generate-creative"),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildCreativeRequest(platform, { forceRegenerate }))
+      },
+      timeoutMs
+    );
+
+    if (!response.ok || !result.ok || !result.asset) {
+      throw new Error(getApiErrorMessage(result, "產出素材時發生錯誤。"));
+    }
+
+    currentRun = normalizeRunState(currentRun);
+    currentRun.creative.config = config;
+    currentRun.creative.assets[platform] = result.asset;
+    saveLastRun(currentRun);
+    renderCreativeAsset(result.asset);
+    unlockCreativePlatformButtons();
+    setCreativeStatus(`${CREATIVE_PLATFORM_META[platform]?.label || "素材"} 已完成。`);
+  } catch (error) {
+    renderCreativeEmptyState();
+    setCreativeStatus(error instanceof Error && error.message ? error.message : "產出素材失敗。");
+  } finally {
+    setCreativeLoadingState(false);
+  }
+}
+
+async function handleCreativeGenerate() {
+  setActiveSurface("creative");
+  setActiveCreativePlatform("facebook", { render: false });
+  await requestCreativeAsset("facebook", { forceRegenerate: true });
+}
+
+async function handleCreativePlatformClick(platform) {
+  setActiveCreativePlatform(platform, { render: false });
+
+  if (!currentRun?.creative?.assets?.facebook && platform !== "facebook") {
+    renderCreativeEmptyState();
+    setCreativeStatus("請先產出主圖。");
+    return;
+  }
+
+  await requestCreativeAsset(platform, { forceRegenerate: true });
 }
 
 function showCopySuccess(button) {
@@ -1756,10 +2756,20 @@ if (form) {
   renderPrompt(getFormData());
   setActiveTab("primary");
   renderEmptyResult("primary");
+  renderCreativeEmptyState();
+  syncCreativePrimaryCopy();
 }
 
 resultTabButtons.forEach((button) => {
   button.addEventListener("click", () => handleTabClick(button.dataset.tab));
+});
+
+surfaceTabButtons.forEach((button) => {
+  button.addEventListener("click", () => setActiveSurface(button.dataset.surface));
+});
+
+creativePlatformButtons.forEach((button) => {
+  button.addEventListener("click", () => handleCreativePlatformClick(button.dataset.creativePlatform));
 });
 
 copyTitleButton?.addEventListener("click", () => handleCopyField("title", copyTitleButton));
@@ -1768,6 +2778,22 @@ copyDescriptionButton?.addEventListener("click", () => handleCopyField("descript
 copyCtaButton?.addEventListener("click", () => handleCopyField("cta", copyCtaButton));
 copyUrlButton?.addEventListener("click", () => handleCopyField("url", copyUrlButton));
 copySmsButton?.addEventListener("click", () => handleCopyField("sms", copySmsButton));
+creativeGenerateButton?.addEventListener("click", handleCreativeGenerate);
+logoImageInput?.addEventListener("change", (event) => {
+  handleCreativeReferenceInputChange("logo", event);
+});
+productImageInput?.addEventListener("change", (event) => {
+  handleCreativeReferenceInputChange("product", event);
+});
+removeLogoButton?.addEventListener("click", () => {
+  handleRemoveCreativeReference("logo");
+});
+removeProductButton?.addEventListener("click", () => {
+  handleRemoveCreativeReference("product");
+});
+creativeCopyPromptButton?.addEventListener("click", () => {
+  copyText(creativePromptPreview?.dataset.copyValue || "", "素材 prompt 已複製到剪貼簿。", creativeCopyPromptButton);
+});
 resultGoogleAdsGroups?.addEventListener("click", async (event) => {
   const button = event.target instanceof Element ? event.target.closest("[data-copy-variant]") : null;
   if (!(button instanceof HTMLButtonElement)) {
@@ -1798,6 +2824,41 @@ stylePresetInput?.addEventListener("change", () => {
   schedulePromptRender();
 });
 
+creativeProfileInput?.addEventListener("change", () => {
+  applyCreativeProfilePreset(creativeProfileInput.value);
+  if (currentRun?.creative?.assets?.[activeCreativePlatform] && !creativeConfigMatchesStored(getCreativeConfig())) {
+    renderCreativeEmptyState();
+    setCreativeStatus("素材設定已變更，請重新產出。");
+  }
+});
+
+creativeStyleInput?.addEventListener("change", () => {
+  syncCreativeAdvancedOptions({ style: creativeStyleInput.value, talent: creativeModelInput?.value || "none" });
+  if (currentRun?.creative?.assets?.[activeCreativePlatform] && !creativeConfigMatchesStored(getCreativeConfig())) {
+    renderCreativeEmptyState();
+    setCreativeStatus("素材設定已變更，請重新產出。");
+  }
+});
+
+creativeModelInput?.addEventListener("change", () => {
+  syncCreativeAdvancedOptions({ style: creativeStyleInput?.value || "clean", talent: creativeModelInput.value });
+  if (currentRun?.creative?.assets?.[activeCreativePlatform] && !creativeConfigMatchesStored(getCreativeConfig())) {
+    renderCreativeEmptyState();
+    setCreativeStatus("素材設定已變更，請重新產出。");
+  }
+});
+
+[creativeCompositionInput, creativeBackgroundInput, creativeFramingInput, creativeStylingInput]
+  .filter(Boolean)
+  .forEach((input) => {
+    input.addEventListener("change", () => {
+      if (currentRun?.creative?.assets?.[activeCreativePlatform] && !creativeConfigMatchesStored(getCreativeConfig())) {
+        renderCreativeEmptyState();
+        setCreativeStatus("素材設定已變更，請重新產出。");
+      }
+    });
+  });
+
 domainPresetInput?.addEventListener("change", () => {
   syncDomainPresetIntoUrl();
   schedulePromptRender();
@@ -1809,7 +2870,13 @@ toggleUrlSettingsButton?.addEventListener("click", () => {
 
 updateVoiceBalanceNote(voiceBalanceInput?.value || 3);
 updateStylePresetNote(stylePresetInput?.value || RANDOM_STYLE_PRESET_KEY);
+updateCreativeProfileNote(creativeProfileInput?.value || "");
+syncCreativeAdvancedOptions();
 setUrlSettingsOpen(false);
+setActiveSurface("copy");
+setActiveCreativePlatform("facebook");
 
 hydrateFromLastRun();
+renderCreativeReferencePreviews();
+syncCreativePlatformButtonState(false);
 checkHealth();

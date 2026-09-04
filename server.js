@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs/promises');
 const { spawn } = require('child_process');
+const creativeEngine = require('./creative-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -105,6 +106,23 @@ app.post('/api/generate-copy', async (req, res) => {
     const mockResponse = generateMockCopy(product_name, benefits, product_url, tone);
     res.json(mockResponse);
   }
+});
+
+app.post('/api/generate-creative', async (req, res) => {
+  if (!isAuthorized(req)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  const asset = await creativeEngine.generateCreativeAsset(req.body || {});
+  return res.json({
+    ok: true,
+    mode: asset.mode || 'mock',
+    provider: asset.provider || 'local-creative-studio',
+    model: asset.imageModel || '',
+    usage: asset.usage || null,
+    warning: asset.warning || '',
+    asset
+  });
 });
 
 async function generateCopyWithBeckV1(productName, benefits, productUrl, tone) {

@@ -1,190 +1,130 @@
-# Lihi Copy Generator 文案產生器
+# creative.bktsai.link
 
-一個把 Beck 文案策略框架產品化的客戶版廣告文案產生器
+`creative.bktsai.link` 的獨立 repo，提供：
 
-## 快速開始
+- creative studio 前端
+- Node / Express bridge API
+- creative image engine
+- DigitalOcean + PM2 live deploy 腳本
 
-### Worker 本機開發
+這個 repo 已經和 `copy.bktsai.link` 分線。請不要再用它部署 `copy` 線。
+
+## Repo
+
+- GitHub: <https://github.com/JardiniTsai168/lihi-copy-generator-creative-v1>
+- Local: `/Users/tonytsai/.openclaw/workspace-lihi-copy-generator-creative-v1`
+
+## 專案結構
+
+```text
+public/                      creative 前端
+bridge-server.js             live bridge API
+creative-engine.js           素材圖生成邏輯
+tests/                       Node test suite
+scripts/deploy-creative-live.sh
+deploy/nginx.creative-v1.conf
+deploy/pm2.creative-v1.config.cjs
+docs/ENGINEER_HANDOFF.md
+```
+
+## 本機開發
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars
-npm run dev
-```
-
-然後開啟 <http://127.0.0.1:8787>
-
-沒有設定 `COPY_ENGINE_ENDPOINT` 或 `BECK_V1_ENDPOINT` 時，Worker 會自動以 mock 模式提供 `/api/health` 與 `/api/generate-copy`。
-
-### Cloudflare Worker 部署
-
-```bash
-npm run deploy
-```
-
-部署前請先設定 Cloudflare secrets / vars：
-
-```bash
-wrangler secret put COPY_ENGINE_API_KEY
-wrangler secret put COPY_ENGINE_ENDPOINT
-```
-
-相容舊設定的話，也可以沿用 `BECK_V1_API_KEY` 與 `BECK_V1_ENDPOINT`。
-
-Worker 會把以下 payload 送到 copy engine endpoint：
-
-```json
-{
-  "productName": "產品名稱",
-  "benefits": ["優點 1", "優點 2", "優點 3"],
-  "productUrl": "https://example.com",
-  "tone": "brand",
-  "voiceBalance": 3
-}
-```
-
-endpoint 可回傳兩種格式之一：
-
-```json
-{
-  "output": {
-    "title": "標題",
-    "body": "主文",
-    "cta": "CTA",
-    "url": "https://example.com"
-  }
-}
-```
-
-或純文字：
-
-```text
-標題：...
-主文：...
-CTA：...
-連結：...
-```
-
-### Bridge Server
-
-本機 bridge server 會保留頁面分析與 OCR，但不再依賴 OpenClaw session，而是直接呼叫模型 API：
-
-```bash
+cp .env.example .env
 npm run bridge:start
 ```
 
-## 環境變數
+預設 bridge port 是 `3456`。
+
+## 測試
 
 ```bash
-COPY_ENGINE_ENDPOINT=https://your-copy-engine.example.com
-COPY_ENGINE_API_KEY=replace-me
-OPENAI_API_KEY=replace-me
-OPENAI_MODEL=gpt-4.1-mini
-OPENAI_TIMEOUT_MS=60000
-SCREENSHOTONE_ACCESS_KEY=replace-me
-SCREENSHOTONE_ENABLED=true
+npm test
 ```
 
-## API
+## 主要 API
 
-### POST /api/generate-copy
+### `POST /generate-copy`
 
-live 模式現在的後端流程是：
+產生文案主稿。
 
-1. 抓取 `productUrl` 銷售頁 HTML
-2. 若 HTML 被 `401/403/429` 或逾時，改用 `ScreenshotOne` 取得 full-page screenshot slices
-3. 解析頁面 title、meta、heading、段落、價格訊號與圖片資訊
-4. 收集完整商品圖清單，並對商品圖或 screenshot slices 跑 OCR
-5. 挑選高價值商品圖與 screenshot slices 做 vision 分析
-6. 把頁面分析結果與使用者輸入欄位合成 Beck 文案策略 prompt
-7. 直接交給模型 API 產出文案
+### `POST /format-copy`
 
-**Request**
+把主稿展開成 channel deliverables。
+
+### `POST /generate-creative`
+
+直接產一張素材圖。
+
+### `POST /internal/generate-review`
+
+產出 3 組 creative review 候選。
+
+支援 override：
+
 ```json
 {
-  "productName": "產品名稱",
-  "benefits": ["優點 1", "優點 2", "優點 3"],
-  "productUrl": "https://example.com",
+  "stylePreset": "premium_brand",
   "tone": "brand",
-  "voiceBalance": 3
+  "voiceBalance": 2,
+  "creativeStyle": "luxury",
+  "talent": "family"
 }
 ```
 
-**Response**
-```json
-{
-  "ok": true,
-  "mode": "live",
-  "provider": "openai",
-  "model": "gpt-4.1-mini",
-  "prompt": "...",
-  "masterDraft": {
-    "hook": "...",
-    "valueProp": "...",
-    "cta": "...",
-    "url": "https://example.com"
-  },
-  "pageAnalysis": {
-    "sourceUrl": "https://example.com",
-    "summary": "頁面摘要..."
-  },
-  "output": {
-    "title": "標題",
-    "body": "主文內容",
-    "cta": "CTA 文字",
-    "url": "https://example.com"
-  }
-}
-```
+每個 creative 都會回傳 `appliedParameters`。
 
-### POST /api/format-copy
+### `POST /internal/generate-formats`
 
-```json
-{
-  "productName": "產品名稱",
-  "productUrl": "https://example.com",
-  "tone": "brand",
-  "voiceBalance": 3,
-  "channel": "line",
-  "masterDraft": {
-    "hook": "...",
-    "audienceAngle": "...",
-    "valueProp": "...",
-    "benefitPoints": ["..."],
-    "proofPoints": ["..."],
-    "cta": "...",
-    "toneNote": "...",
-    "url": "https://example.com"
-  }
-}
-```
+依選定平台展開格式與素材尺寸，根層也會回傳 `appliedParameters`。
 
-### OCR / 頁面分析相關環境變數
+## 部署
+
+### 推到 live
 
 ```bash
-PAGE_FETCH_TIMEOUT_MS=15000
-IMAGE_FETCH_TIMEOUT_MS=15000
-OCR_IMAGE_LIMIT=3
-OCR_MAX_IMAGE_BYTES=4194304
-OCR_LANG=chi_tra+eng
-MAX_PRODUCT_IMAGES=30
-OCR_ALL_IMAGES=true
-VISION_IMAGE_LIMIT=8
-SCREENSHOT_VISION_LIMIT=3
-SCREENSHOTONE_ACCESS_KEY=replace-me
-SCREENSHOTONE_ENABLED=true
-SCREENSHOTONE_API_BASE_URL=https://api.screenshotone.com/take
-SCREENSHOTONE_VIEWPORT_WIDTH=1440
-SCREENSHOTONE_VIEWPORT_HEIGHT=1800
-SCREENSHOTONE_FULL_PAGE_MAX_HEIGHT=20000
-SCREENSHOTONE_SLICE_HEIGHT=4000
+./scripts/deploy-creative-live.sh
 ```
 
-## GitHub Pages Demo
+先做 dry run：
 
-<https://jardinitsai168.github.io/lihi-copy-generator-v1/>
+```bash
+./scripts/deploy-creative-live.sh --dry-run
+```
 
-GitHub Pages 版本仍是純靜態 demo，不會呼叫 live endpoint。
+這支腳本會：
+
+- 備份遠端目前的 `bridge-server.js`、`creative-engine.js`、`package*.json`、`public/`
+- 同步本 repo 的 `public/`
+- 同步 `bridge-server.js`、`creative-engine.js`、`package*.json`
+- 在遠端執行 `npm install --omit=dev`
+- `pm2 restart creative-v1 --update-env`
+
+### 禁止誤 deploy 到 copy
+
+```bash
+./scripts/deploy-live.sh
+```
+
+這支腳本會直接拒絕執行，避免把 creative repo 部署到 `copy.bktsai.link`。
+
+## 工程師交接
+
+請直接看 [docs/ENGINEER_HANDOFF.md](docs/ENGINEER_HANDOFF.md)。
+
+內容包含：
+
+- 伺服器上需要存在的檔案
+- `.env` 需求
+- PM2 設定
+- nginx reverse proxy 範本
+- live 驗證步驟
+
+## 備註
+
+- `.openclaw/`、`.runtime/`、`memory/` 與各 workspace 檔案都不是產品交付內容。
+- `server.js` / `src/worker.js` 保留做本地或舊流程相容；`creative.bktsai.link` live 主要由 `bridge-server.js` 提供。
 
 ## License
 

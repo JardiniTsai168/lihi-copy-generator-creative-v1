@@ -37,7 +37,7 @@
                 </div>
                 <div class="url-input-row">
                   <input id="productUrl" name="productUrl" type="text" maxlength="300" placeholder="請輸入產品頁面連結" required />
-                  <button class="url-settings-button" type="button" id="toggle-url-settings" aria-expanded="false" aria-controls="url-settings-panel" disabled>設定網址</button>
+                  <button class="url-settings-button is-hidden" type="button" id="toggle-url-settings" aria-expanded="false" aria-controls="url-settings-panel" disabled>設定網址</button>
                 </div>
                 <div class="field field-subfield url-settings-panel is-hidden" id="url-settings-panel">
                   <span>網址設定</span>
@@ -159,93 +159,327 @@
 
         <section class="panel panel-output">
           <div class="panel-head">
-            <h2>產出文案</h2>
+            <h2>內容工作台</h2>
           </div>
 
-          <div class="result-tabs" id="result-tabs" role="tablist" aria-label="文案格式">
-            <button class="result-tab is-active" type="button" id="tab-primary" data-tab="primary" role="tab" aria-selected="true">主要文案</button>
-            <button class="result-tab" type="button" id="tab-meta-ad" data-tab="meta_ad" role="tab" aria-selected="false">Meta 廣告</button>
-            <button class="result-tab" type="button" id="tab-google-ads" data-tab="google_ads" role="tab" aria-selected="false">Google Ads</button>
-            <button class="result-tab" type="button" id="tab-sms" data-tab="sms" role="tab" aria-selected="false">SMS</button>
-            <button class="result-tab" type="button" id="tab-line" data-tab="line" role="tab" aria-selected="false">LINE</button>
-            <button class="result-tab" type="button" id="tab-email" data-tab="email" role="tab" aria-selected="false">Email</button>
+          <div class="surface-tabs" id="surface-tabs" role="tablist" aria-label="工作模式">
+            <button class="surface-tab is-active" type="button" data-surface="copy" role="tab" aria-selected="true">產出文案</button>
+            <button class="surface-tab" type="button" data-surface="creative" role="tab" aria-selected="false">產出素材</button>
           </div>
 
-          <div class="output-card empty" id="result-card">
-            <div class="result-block result-block-sms is-hidden" id="result-sms-block">
-              <div class="result-head">
-                <span class="result-label sms-result-label" id="result-compact-label">SMS</span>
-                <button class="icon-copy-button" type="button" id="copy-sms-button" aria-label="複製渠道文案" disabled>
-                  <span aria-hidden="true">⧉</span>
-                </button>
-              </div>
-              <div class="sms-combined-copy" id="result-sms-copy">
-                <p><span id="result-sms-title">尚未產出</span></p>
-                <p><span id="result-sms-body">點擊上方 tab 後，會在這裡顯示渠道文案。</span></p>
-                <p class="sms-tail">
-                  <span id="result-sms-cta">-</span>
-                  <a id="result-sms-url" href="#" target="_blank" rel="noreferrer">-</a>
-                </p>
-              </div>
+          <div class="surface-panel" data-surface-panel="copy">
+            <div class="result-tabs" id="result-tabs" role="tablist" aria-label="文案格式">
+              <button class="result-tab is-active" type="button" id="tab-primary" data-tab="primary" role="tab" aria-selected="true">主要文案</button>
+              <button class="result-tab" type="button" id="tab-meta-ad" data-tab="meta_ad" role="tab" aria-selected="false">Meta 廣告</button>
+              <button class="result-tab" type="button" id="tab-google-ads" data-tab="google_ads" role="tab" aria-selected="false">Google Ads</button>
+              <button class="result-tab" type="button" id="tab-sms" data-tab="sms" role="tab" aria-selected="false">SMS</button>
+              <button class="result-tab" type="button" id="tab-line" data-tab="line" role="tab" aria-selected="false">LINE</button>
+              <button class="result-tab" type="button" id="tab-email" data-tab="email" role="tab" aria-selected="false">Email</button>
             </div>
-            <div class="result-block result-block-title">
-              <div class="result-head">
-                <span class="result-label" id="result-title-label">標題</span>
-                <button class="icon-copy-button" type="button" id="copy-title-button" aria-label="複製標題" disabled>
-                  <span aria-hidden="true">⧉</span>
-                </button>
-              </div>
-              <h3 id="result-title">尚未產出</h3>
-            </div>
-            <div class="result-block result-block-body">
-              <div class="result-head">
-                <span class="result-label" id="result-body-label">主文</span>
-                <button class="icon-copy-button" type="button" id="copy-body-button" aria-label="複製主文" disabled>
-                  <span aria-hidden="true">⧉</span>
-                </button>
-              </div>
-              <div id="result-body">送出表單後，會在這裡顯示完整廣告文案。</div>
-            </div>
-            <div class="result-block result-block-google-ads is-hidden" id="result-google-ads-block">
-              <div class="result-head">
-                <span class="result-label">Google Ads 文案</span>
-              </div>
-              <div class="google-ads-group-list" id="result-google-ads-groups"></div>
-            </div>
-            <div class="result-block result-block-description is-hidden" id="result-description-block">
-              <div class="result-head">
-                <span class="result-label" id="result-description-label">Description</span>
-                <button class="icon-copy-button" type="button" id="copy-description-button" aria-label="複製 Description" disabled>
-                  <span aria-hidden="true">⧉</span>
-                </button>
-              </div>
-              <p id="result-description">-</p>
-            </div>
-            <div class="result-row">
-              <div class="result-block result-block-cta">
+
+            <div class="output-card empty" id="result-card">
+              <div class="result-block result-block-sms is-hidden" id="result-sms-block">
                 <div class="result-head">
-                  <span class="result-label" id="result-cta-label">CTA</span>
-                  <button class="icon-copy-button" type="button" id="copy-cta-button" aria-label="複製 CTA" disabled>
+                  <span class="result-label sms-result-label" id="result-compact-label">SMS</span>
+                  <button class="icon-copy-button" type="button" id="copy-sms-button" aria-label="複製渠道文案" disabled>
                     <span aria-hidden="true">⧉</span>
                   </button>
                 </div>
-                <p id="result-cta">-</p>
+                <div class="sms-combined-copy" id="result-sms-copy">
+                  <p><span id="result-sms-title">尚未產出</span></p>
+                  <p><span id="result-sms-body">點擊上方 tab 後，會在這裡顯示渠道文案。</span></p>
+                  <p class="sms-tail">
+                    <span id="result-sms-cta">-</span>
+                    <a id="result-sms-url" href="#" target="_blank" rel="noreferrer">-</a>
+                  </p>
+                </div>
               </div>
-              <div class="result-block result-block-url">
+              <div class="result-block result-block-title">
                 <div class="result-head">
-                  <span class="result-label" id="result-url-label">連結</span>
-                  <button class="icon-copy-button" type="button" id="copy-url-button" aria-label="複製連結" disabled>
+                  <span class="result-label" id="result-title-label">標題</span>
+                  <button class="icon-copy-button" type="button" id="copy-title-button" aria-label="複製標題" disabled>
                     <span aria-hidden="true">⧉</span>
                   </button>
                 </div>
-                <a id="result-url" href="#" target="_blank" rel="noreferrer">-</a>
+                <h3 id="result-title">尚未產出</h3>
+              </div>
+              <div class="result-block result-block-body">
+                <div class="result-head">
+                  <span class="result-label" id="result-body-label">主文</span>
+                  <button class="icon-copy-button" type="button" id="copy-body-button" aria-label="複製主文" disabled>
+                    <span aria-hidden="true">⧉</span>
+                  </button>
+                </div>
+                <div id="result-body">送出表單後，會在這裡顯示完整廣告文案。</div>
+              </div>
+              <div class="result-block result-block-google-ads is-hidden" id="result-google-ads-block">
+                <div class="result-head">
+                  <span class="result-label">Google Ads 文案</span>
+                </div>
+                <div class="google-ads-group-list" id="result-google-ads-groups"></div>
+              </div>
+              <div class="result-block result-block-description is-hidden" id="result-description-block">
+                <div class="result-head">
+                  <span class="result-label" id="result-description-label">Description</span>
+                  <button class="icon-copy-button" type="button" id="copy-description-button" aria-label="複製 Description" disabled>
+                    <span aria-hidden="true">⧉</span>
+                  </button>
+                </div>
+                <p id="result-description">-</p>
+              </div>
+              <div class="result-row">
+                <div class="result-block result-block-cta">
+                  <div class="result-head">
+                    <span class="result-label" id="result-cta-label">CTA</span>
+                    <button class="icon-copy-button" type="button" id="copy-cta-button" aria-label="複製 CTA" disabled>
+                      <span aria-hidden="true">⧉</span>
+                    </button>
+                  </div>
+                  <p id="result-cta">-</p>
+                </div>
+                <div class="result-block result-block-url">
+                  <div class="result-head">
+                    <span class="result-label" id="result-url-label">連結</span>
+                    <button class="icon-copy-button" type="button" id="copy-url-button" aria-label="複製連結" disabled>
+                      <span aria-hidden="true">⧉</span>
+                    </button>
+                  </div>
+                  <a id="result-url" href="#" target="_blank" rel="noreferrer">-</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="surface-panel is-hidden" data-surface-panel="creative">
+            <div class="creative-intro">
+              <div>
+                <span class="creative-kicker">Creative Studio</span>
+                <h3>先用主文案產 Facebook 主圖，再延伸其他平台格式</h3>
+              </div>
+              <p>切到這裡後會自動帶入主文案。先套用風格包，再微調素材風格、模特兒與進階畫面設定。</p>
+            </div>
+
+            <div class="creative-config-card">
+              <div class="reference-upload-section" aria-label="素材參考圖">
+                <div class="reference-upload-head">
+                  <div>
+                    <span class="reference-upload-title">素材參考圖</span>
+                    <p class="reference-upload-copy">上傳 `logo` 和 `產品圖` 之後，這次產圖會一起帶進去。</p>
+                  </div>
+                </div>
+
+                <div class="reference-upload-grid">
+                  <label class="reference-upload-card" for="logoImageInput">
+                    <input id="logoImageInput" type="file" accept="image/*" hidden />
+                    <span class="reference-upload-label">上傳 logo</span>
+                    <span class="reference-upload-hint">建議透明背景 PNG / SVG</span>
+                  </label>
+
+                  <label class="reference-upload-card" for="productImageInput">
+                    <input id="productImageInput" type="file" accept="image/*" hidden />
+                    <span class="reference-upload-label">上傳產品圖</span>
+                    <span class="reference-upload-hint">建議主產品清楚、背景乾淨</span>
+                  </label>
+                </div>
+
+                <div class="reference-preview-grid">
+                  <div class="reference-preview-card is-hidden" id="logoPreviewCard">
+                    <div class="reference-preview-meta">
+                      <span class="reference-preview-name">Logo</span>
+                      <button class="text-button reference-remove-button" type="button" id="removeLogoButton">清空</button>
+                    </div>
+                    <div class="reference-preview-frame">
+                      <img id="logoPreviewImage" alt="Logo 預覽" class="reference-preview-image" />
+                    </div>
+                  </div>
+
+                  <div class="reference-preview-card is-hidden" id="productPreviewCard">
+                    <div class="reference-preview-meta">
+                      <span class="reference-preview-name">產品圖</span>
+                      <button class="text-button reference-remove-button" type="button" id="removeProductButton">清空</button>
+                    </div>
+                    <div class="reference-preview-frame">
+                      <img id="productPreviewImage" alt="產品圖預覽" class="reference-preview-image" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <label class="field">
+                <span>主文案</span>
+                <textarea id="creative-primary-copy" rows="7" readonly placeholder="先在左邊產出主文案，這裡會自動帶入。"></textarea>
+              </label>
+
+              <label class="field">
+                <span>快速套用風格包</span>
+                <select id="creative-profile">
+                  <option value="" selected>不套用，自己調</option>
+                  <option value="warm_family_dinner_v1">家庭晚餐暖感版</option>
+                  <option value="offer_bold_conversion_v1">高轉單促購版</option>
+                  <option value="luxury_editorial_hero_v1">高級品牌主視覺版</option>
+                  <option value="ugc_staff_demo_v1">專人示範說明版</option>
+                  <option value="senior_trust_story_v1">熟齡安心信任版</option>
+                  <option value="couple_gifting_moment_v1">雙人送禮分享版</option>
+                </select>
+                <p class="field-note" id="creative-profile-note">先選一個常用配方，底下欄位會一起帶入；之後仍可再手動微調。</p>
+              </label>
+
+              <div class="creative-config-grid">
+                <label class="field">
+                  <span>素材風格</span>
+                  <select id="creative-style">
+                    <option value="clean" selected>清爽產品感</option>
+                    <option value="bold">高轉換吸睛版</option>
+                    <option value="warm">溫暖生活感</option>
+                    <option value="luxury">高級品牌版</option>
+                    <option value="saas">SaaS 服務版</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>模特兒設定</span>
+                  <select id="creative-model">
+                    <option value="none" selected>不要模特兒</option>
+                    <option value="adult">生活感模特兒</option>
+                    <option value="family">家庭互動模特兒</option>
+                    <option value="couple">雙人互動模特兒</option>
+                    <option value="senior">熟齡信任模特兒</option>
+                    <option value="staff">專人示範模特兒</option>
+                    <option value="hand">只出現手部互動</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>構圖方向</span>
+                  <select id="creative-composition">
+                    <option value="" selected>自動</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>背景氛圍</span>
+                  <select id="creative-background">
+                    <option value="" selected>自動</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>主體鏡位</span>
+                  <select id="creative-framing">
+                    <option value="" selected>自動</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span>主體風格</span>
+                  <select id="creative-styling">
+                    <option value="" selected>自動</option>
+                  </select>
+                </label>
+              </div>
+
+              <p class="field-note creative-config-note">`adsdb` 若要直接指定素材組合，可對接同一組 `creativeProfile`、`variantSelections`、`talentSelections`。</p>
+
+              <div class="actions actions-creative">
+                <button class="primary-button" type="button" id="creative-generate-button">產出主圖</button>
+                <p class="status" id="creative-status">先產出主文案，再來這裡做素材。</p>
+              </div>
+            </div>
+
+            <div class="creative-logo-legend" aria-label="平台 logo 說明">
+              <span class="creative-legend-item">
+                <span class="creative-logo creative-logo-facebook" aria-hidden="true">f</span>
+                <span class="creative-legend-label">Facebook</span>
+              </span>
+              <span class="creative-legend-item">
+                <span class="creative-logo creative-logo-instagram" aria-hidden="true"></span>
+                <span class="creative-legend-label">Instagram</span>
+              </span>
+              <span class="creative-legend-item">
+                <span class="creative-logo creative-logo-threads" aria-hidden="true">@</span>
+                <span class="creative-legend-label">Threads</span>
+              </span>
+              <span class="creative-legend-item">
+                <span class="creative-logo creative-logo-reels" aria-hidden="true"></span>
+                <span class="creative-legend-label">Reels</span>
+              </span>
+              <span class="creative-legend-item">
+                <span class="creative-logo creative-logo-stories" aria-hidden="true"></span>
+                <span class="creative-legend-label">Stories</span>
+              </span>
+              <span class="creative-legend-item">
+                <span class="creative-logo creative-logo-googleads" aria-hidden="true"></span>
+                <span class="creative-legend-label">Google Ads</span>
+              </span>
+            </div>
+
+            <div class="creative-platform-tabs" id="creative-platform-tabs" role="tablist" aria-label="素材平台">
+              <button class="result-tab creative-ratio-tab is-active" type="button" data-creative-platform="facebook" role="tab" aria-selected="true" aria-label="1:1，Facebook、Instagram、Threads、Google Ads">
+                <span class="creative-ratio-label">1:1</span>
+                <span class="creative-logo-row" aria-hidden="true">
+                  <span class="creative-logo creative-logo-facebook">f</span>
+                  <span class="creative-logo creative-logo-instagram"></span>
+                  <span class="creative-logo creative-logo-threads">@</span>
+                  <span class="creative-logo creative-logo-googleads"></span>
+                </span>
+              </button>
+              <button class="result-tab creative-ratio-tab" type="button" data-creative-platform="instagram" role="tab" aria-selected="false" aria-label="4:5，Facebook、Instagram、Threads" disabled>
+                <span class="creative-ratio-label">4:5</span>
+                <span class="creative-logo-row" aria-hidden="true">
+                  <span class="creative-logo creative-logo-facebook">f</span>
+                  <span class="creative-logo creative-logo-instagram"></span>
+                  <span class="creative-logo creative-logo-threads">@</span>
+                </span>
+              </button>
+              <button class="result-tab creative-ratio-tab" type="button" data-creative-platform="threads" role="tab" aria-selected="false" aria-label="9:16，Reels、Stories" disabled>
+                <span class="creative-ratio-label">9:16</span>
+                <span class="creative-logo-row" aria-hidden="true">
+                  <span class="creative-logo creative-logo-reels"></span>
+                  <span class="creative-logo creative-logo-stories"></span>
+                </span>
+              </button>
+              <button class="result-tab creative-ratio-tab" type="button" data-creative-platform="google_ads" role="tab" aria-selected="false" aria-label="1.91:1，Facebook、Instagram、Google Ads" disabled>
+                <span class="creative-ratio-label">1.91:1</span>
+                <span class="creative-logo-row" aria-hidden="true">
+                  <span class="creative-logo creative-logo-facebook">f</span>
+                  <span class="creative-logo creative-logo-instagram"></span>
+                  <span class="creative-logo creative-logo-googleads"></span>
+                </span>
+              </button>
+            </div>
+
+            <div class="creative-preview-card empty" id="creative-preview-card">
+              <div class="creative-preview-head">
+                <div class="creative-preview-meta">
+                  <span class="chip chip-secondary" id="creative-size-badge">1:1</span>
+                  <span class="chip chip-secondary" id="creative-cost-badge">USD --</span>
+                  <span class="creative-meta-text" id="creative-meta-text">尚未產出素材</span>
+                </div>
+                <button class="icon-copy-button" type="button" id="creative-copy-prompt-button" aria-label="複製素材 prompt" disabled>
+                  <span aria-hidden="true">⧉</span>
+                </button>
+              </div>
+
+              <div class="creative-stage" id="creative-stage">
+                <img id="creative-image" alt="AI 廣告素材預覽" class="creative-image is-hidden" />
+                <div class="creative-empty-state" id="creative-empty-state">
+                  <strong>這裡會出現素材預覽</strong>
+                  <p>第一步先產 Facebook 主圖，之後下方 tab 就能延伸其他尺寸。</p>
+                </div>
+              </div>
+
+              <div class="creative-prompt-block">
+                <div class="result-head">
+                  <span class="result-label">素材 prompt</span>
+                </div>
+                <div id="creative-prompt-preview">尚未產生素材 prompt。</div>
               </div>
             </div>
           </div>
         </section>
       </section>
     </main>
-    <script src="./config.js?v=20260729a"></script>
-    <script src="./app.js?v=20260730a"></script>
+    <script src="./config.js?v=20260802a"></script>
+    <script src="./app.js?v=20260802b"></script>
   </body>
 </html>

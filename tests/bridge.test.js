@@ -77,6 +77,140 @@ test("bridge allows explicitly configured public origins when API key is not con
   });
 
   assert.equal(bridge.hasAuthorizedBridgeAccess(req), true);
+  assert.equal(bridge.getAllowedRequestOrigin(req), "https://copy.bktsai.link");
+});
+
+test("bridge returns allowed github pages origin for cors", () => {
+  const bridge = loadBridgeModule({
+    BRIDGE_ALLOWED_ORIGINS: "https://jardinitsai168.github.io"
+  });
+  const req = createRequest({
+    host: "creative.bktsai.link",
+    "x-forwarded-host": "creative.bktsai.link",
+    origin: "https://jardinitsai168.github.io"
+  });
+
+  assert.equal(bridge.hasAuthorizedBridgeAccess(req), true);
+  assert.equal(bridge.getAllowedRequestOrigin(req), "https://jardinitsai168.github.io");
+});
+
+test("bridge allows allowed github pages origin for internal endpoints even when API key is configured", () => {
+  const bridge = loadBridgeModule({
+    BRIDGE_API_KEY: "top-secret",
+    BRIDGE_ALLOWED_ORIGINS: "https://jardinitsai168.github.io"
+  });
+  const req = createRequest({
+    host: "creative.bktsai.link",
+    "x-forwarded-host": "creative.bktsai.link",
+    origin: "https://jardinitsai168.github.io"
+  });
+  req.path = "/internal/generate-review";
+
+  assert.equal(bridge.hasAuthorizedBridgeAccess(req), true);
+});
+
+test("bridge allows adsdb origin for internal endpoints even when API key is configured", () => {
+  const bridge = loadBridgeModule({
+    BRIDGE_API_KEY: "top-secret"
+  });
+  const req = createRequest({
+    host: "creative.bktsai.link",
+    "x-forwarded-host": "creative.bktsai.link",
+    origin: "https://adsdb.bktsai.link"
+  });
+  req.path = "/internal/generate-review";
+
+  assert.equal(bridge.hasAuthorizedBridgeAccess(req), true);
+  assert.equal(bridge.getAllowedRequestOrigin(req), "https://adsdb.bktsai.link");
+});
+
+test("bridge protects creative endpoints for browser access control", () => {
+  const bridge = loadBridgeModule();
+
+  assert.equal(bridge.isProtectedEndpoint("/generate-creative"), true);
+  assert.equal(bridge.isProtectedEndpoint("/api/generate-creative"), true);
+  assert.equal(bridge.isProtectedEndpoint("/internal/generate-review"), true);
+  assert.equal(bridge.isProtectedEndpoint("/internal/generate-formats"), true);
+  assert.equal(bridge.isProtectedEndpoint("/internal/meta-ads-mcp"), true);
+});
+
+test("bridge treats meta ads relay as an internal endpoint", () => {
+  const bridge = loadBridgeModule();
+
+  assert.equal(bridge.isInternalEndpoint("/internal/meta-ads-mcp"), true);
+});
+
+test("buildMetaAdsMcpRelayHeaders forwards auth and session headers", () => {
+  const bridge = loadBridgeModule();
+  const req = createRequest({
+    accept: "application/json",
+    authorization: "Bearer fb-token",
+    "mcp-session-id": "session-123"
+  });
+
+  assert.deepEqual(bridge.buildMetaAdsMcpRelayHeaders(req), {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Authorization: "Bearer fb-token",
+    "Mcp-Session-Id": "session-123"
+  });
+});
+
+test("parseStringArrayField normalizes JSON arrays and falls back safely", () => {
+  const bridge = loadBridgeModule();
+
+  assert.deepEqual(bridge.parseStringArrayField("[\"a\", \"b\"]"), ["a", "b"]);
+  assert.deepEqual(bridge.parseStringArrayField("not-json"), []);
+});
+
+test("validateInternalUploadFile allows svg logo but rejects svg product images", () => {
+  const bridge = loadBridgeModule();
+
+  assert.equal(
+    bridge.validateInternalUploadFile({
+      fieldname: "logo",
+      mimetype: "image/svg+xml",
+      originalname: "brand.svg"
+    }),
+    null
+  );
+
+  const error = bridge.validateInternalUploadFile({
+    fieldname: "productImage",
+    mimetype: "image/svg+xml",
+    originalname: "product.svg"
+  });
+
+  assert.equal(error?.errorCode, "UNSUPPORTED_MEDIA_TYPE");
+});
+
+test("bridge builds creative assets for the production creative route", () => {
+  const bridge = loadBridgeModule();
+  const asset = bridge.buildCreativeAsset({
+    productName: "南瓜濃湯",
+    primaryCopy: "先把主打的濃郁口感和加熱方便講清楚。",
+    platform: "facebook",
+    source: {
+      title: "暖胃也暖心的日常補給",
+      body: "濃郁南瓜香氣，加熱後就能快速上桌。",
+      cta: "立即了解",
+      benefits: ["濃郁南瓜香氣", "加熱後快速上桌", "日常補給更方便"]
+    },
+    config: {
+      style: "warm",
+      model: "none"
+    }
+  });
+
+  assert.equal(asset.platform, "facebook");
+  assert.equal(asset.sizeLabel, "1440 x 1440 1:1");
+  assert.match(asset.prompt, /1440x1440/);
+  assert.match(asset.prompt, /先把主打的濃郁口感和加熱方便講清楚。/);
+  assert.match(asset.prompt, /立即了解/);
+  assert.equal(asset.prompt.includes("暖胃也暖心的日常補給"), false);
+  assert.match(asset.prompt, /建議優先使用以下賣點：/);
+  assert.match(asset.prompt, /1\. 濃郁南瓜香氣/);
+  assert.match(asset.imageUrl, /^data:image\/svg\+xml/);
 });
 
 test("resolveSafeOutputUrl rejects private URLs from model output", () => {

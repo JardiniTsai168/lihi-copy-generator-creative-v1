@@ -121,6 +121,17 @@ npm test
 - nginx reverse proxy 範本
 - live 驗證步驟
 
+## AI Agent API 文件
+
+需要讓 AI agent 呼叫文案與素材 API 時，請看 [docs/AI_AGENT_API_GUIDE.md](docs/AI_AGENT_API_GUIDE.md)。
+
+內容包含：
+
+- 推薦的 review → formats 兩段式流程
+- 認證與 secret 安全規則
+- request / response schema 與 Node.js 範例
+- 素材暫存生命週期、錯誤處理與重試策略
+
 ## 備註
 
 - `.openclaw/`、`.runtime/`、`memory/` 與各 workspace 檔案都不是產品交付內容。

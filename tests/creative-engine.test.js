@@ -69,6 +69,44 @@ test("headline renderer converts Traditional Chinese text into portable SVG outl
   assert.doesNotMatch(markup, /<text|<tspan|中文字型正常顯示/);
 });
 
+test("headline wrapping keeps the reported long title inside the text-card safe width", () => {
+  const title = "拒絕無效發送，讓每一封簡訊都具備行銷實質效益";
+  const layout = creativeEngine.fitHeadlineLayout(title, {
+    maxWidth: 1000,
+    maxHeight: 680,
+    preferredFontSize: 112,
+    minFontSize: 58,
+    maxLines: 4
+  });
+
+  assert.ok(
+    layout.lineWidths.every((width) => width <= 1000),
+    `headline overflowed: ${JSON.stringify(layout)}`
+  );
+  assert.equal(layout.truncated, false);
+  assert.ok(layout.blockHeight <= 680);
+});
+
+test("text-card candidates use their layout seed to produce distinct designs", async () => {
+  const imageUrls = await Promise.all(["creative_001", "creative_002", "creative_003"].map(async (layoutSeed) => {
+    const asset = await creativeEngine.generateCreativeAsset({
+      productName: "LIHI 簡訊",
+      platform: "facebook",
+      source: { title: "拒絕無效發送，讓每一封簡訊都具備行銷實質效益" },
+      config: {
+        assetMode: "text_card",
+        headline: "拒絕無效發送，讓每一封簡訊都具備行銷實質效益",
+        style: "clean",
+        talent: "none",
+        layoutSeed
+      }
+    }, { apiKey: "test-key" });
+    return asset.imageUrl;
+  }));
+
+  assert.equal(new Set(imageUrls).size, 3);
+});
+
 test("image headline mode asks for a text-free background and overlays the supplied headline", async () => {
   let capturedPrompt = "";
   const asset = await creativeEngine.generateCreativeAsset(

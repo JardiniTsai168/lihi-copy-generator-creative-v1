@@ -4468,6 +4468,7 @@ async function generateInternalReviewCreative(batchId, input, recipe, pageAnalys
         talentSelections: recipe.talentSelections || {},
         assetMode: recipe.assetMode || "standard",
         headline: recipe.assetHeadline || bundle.output.title,
+        layoutSeed: recipe.creativeId,
         imageModel: "openai/gpt-5.4-image-2"
       }
     },
@@ -4565,6 +4566,7 @@ async function createInternalFormatDeliverable(storedBatch, creativeRecord, deli
         talentSelections: creativeRecord.recipe.talentSelections || {},
         assetMode: creativeRecord.recipe.assetMode || "standard",
         headline: creativeRecord.recipe.assetHeadline || channelOutput.title || creativeRecord.primaryOutput.title,
+        layoutSeed: creativeRecord.recipe.creativeId,
         imageModel: "openai/gpt-5.4-image-2"
       }
     },

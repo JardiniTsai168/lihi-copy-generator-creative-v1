@@ -267,6 +267,7 @@ function normalizeCreativeInput(body = {}) {
   const talent = normalizeCreativeModel(body?.config?.talent || body?.config?.model);
   const imageModel = normalizeCreativeImageModel(body?.config?.imageModel);
   const assetMode = normalizeCreativeAssetMode(body?.config?.assetMode ?? body?.assetMode);
+  const layoutSeed = compactCreativeText(body?.config?.layoutSeed || body?.layoutSeed || "");
   const platformMeta = getCreativePlatformMeta(platform);
   const productName = String(body?.productName || "未命名產品").trim();
   const primaryCopy = compactCreativeText(body?.primaryCopy || "");
@@ -286,6 +287,7 @@ function normalizeCreativeInput(body = {}) {
     talent,
     imageModel,
     assetMode,
+    layoutSeed,
     productName,
     primaryCopy,
     title,
@@ -805,16 +807,16 @@ function buildFallbackCreativeAsset(input, prompt) {
 }
 
 function buildTextCardDataUrl(input) {
-  const { platformMeta, title, style, references } = input;
+  const { platformMeta, title, style, references, layoutSeed } = input;
   const width = platformMeta.width;
   const height = platformMeta.height;
-  const variantIndex = stableTextHash(`${title}:${style}:${platformMeta.aspectRatio}`) % 4;
   const themes = [
     { background: "#FFF5F8", panel: "#FFFDFD", ink: "#1A1A5E", accent: "#FF6B9D", border: "#1A1A5E" },
     { background: "#1A1A5E", panel: "#27276F", ink: "#FFF8FB", accent: "#FF8DB4", border: "#FF8DB4" },
     { background: "#FFD9E7", panel: "#FFF9FB", ink: "#171750", accent: "#D93675", border: "#171750" },
     { background: "#FFF0C7", panel: "#FFFCF3", ink: "#1A1A5E", accent: "#FF4D88", border: "#1A1A5E" }
   ];
+  const variantIndex = stableTextHash(layoutSeed || `${title}:${style}:${platformMeta.aspectRatio}`) % themes.length;
   const theme = themes[variantIndex];
   const isLandscape = width / height > 1.4;
   const padding = Math.round(Math.min(width, height) * 0.075);
@@ -822,12 +824,18 @@ function buildTextCardDataUrl(input) {
   const panelY = variantIndex === 1 ? Math.round(height * 0.12) : Math.round(height * 0.15);
   const panelWidth = width - panelX * 2;
   const panelHeight = height - panelY * 2;
-  const fontSize = Math.round(Math.min(width * (isLandscape ? 0.052 : 0.078), height * 0.12));
-  const maxChars = isLandscape ? 22 : 13;
-  const lines = wrapHeadline(title, maxChars, 4);
-  const lineHeight = Math.round(fontSize * 1.22);
-  const textBlockHeight = lineHeight * lines.length;
-  const textY = Math.round((height - textBlockHeight) / 2 + fontSize * 0.86);
+  const preferredFontSize = Math.round(Math.min(width * (isLandscape ? 0.052 : 0.078), height * 0.12));
+  const horizontalInset = Math.round(panelWidth * (variantIndex === 2 ? 0.12 : 0.09));
+  const layout = fitHeadlineLayout(title, {
+    maxWidth: panelWidth - horizontalInset * 2,
+    maxHeight: panelHeight * 0.68,
+    preferredFontSize,
+    minFontSize: Math.max(34, Math.round(preferredFontSize * 0.52)),
+    maxLines: isLandscape ? 3 : 4,
+    lineHeightRatio: 1.2
+  });
+  const { lines, fontSize, lineHeight, blockHeight: textBlockHeight } = layout;
+  const textY = Math.round((height - textBlockHeight) / 2 + fontSize * 0.88);
   const textX = variantIndex === 2 ? panelX + Math.round(panelWidth * 0.1) : width / 2;
   const anchor = variantIndex === 2 ? "start" : "middle";
   const logoMarkup = references.logo
@@ -861,11 +869,19 @@ function buildImageHeadlineDataUrl(backgroundImageUrl, input) {
   const boxX = Math.round(width * 0.035);
   const boxY = Math.round(height * 0.055);
   const boxWidth = Math.round(width * (isLandscape ? 0.64 : 0.83));
-  const fontSize = Math.round(Math.min(width * (isLandscape ? 0.052 : 0.067), height * (isPortrait ? 0.045 : 0.072)));
-  const lines = wrapHeadline(title, isLandscape ? 22 : isPortrait ? 12 : 15, 3);
-  const lineHeight = Math.round(fontSize * 1.2);
-  const innerPadding = Math.round(fontSize * 0.58);
-  const boxHeight = lineHeight * lines.length + innerPadding * 2;
+  const preferredFontSize = Math.round(Math.min(width * (isLandscape ? 0.052 : 0.067), height * (isPortrait ? 0.045 : 0.072)));
+  const horizontalPadding = Math.round(width * (isLandscape ? 0.035 : 0.045));
+  const layout = fitHeadlineLayout(title, {
+    maxWidth: boxWidth - horizontalPadding * 2,
+    maxHeight: height * (isLandscape ? 0.34 : isPortrait ? 0.24 : 0.28),
+    preferredFontSize,
+    minFontSize: Math.max(32, Math.round(preferredFontSize * 0.52)),
+    maxLines: isLandscape ? 3 : 4,
+    lineHeightRatio: 1.18
+  });
+  const { lines, fontSize, lineHeight, blockHeight } = layout;
+  const innerPadding = Math.max(horizontalPadding, Math.round(fontSize * 0.58));
+  const boxHeight = blockHeight + innerPadding * 2;
   const accent = getCreativePalette(style).cardAccent || "#FF6B9D";
   const lineMarkup = buildHeadlineMarkup(lines, {
     x: boxX + innerPadding,
@@ -942,49 +958,98 @@ async function rasterizeCreativeSvgDataUrl(dataUrl) {
   };
 }
 
-function wrapHeadline(value, maxCharsPerLine, maxLines) {
+function wrapHeadlineByWidth(value, maxWidth, fontSize, maxLines) {
   const chars = Array.from(compactCreativeText(value));
   const lines = [];
-  const plannedLineCount = Math.min(maxLines, Math.max(1, Math.ceil(chars.length / maxCharsPerLine)));
+  let truncated = false;
 
-  while (chars.length && lines.length < plannedLineCount) {
-    const remainingLines = plannedLineCount - lines.length;
-    if (remainingLines === 1) {
-      const finalLine = chars.splice(0, maxCharsPerLine);
-      if (chars.length) {
-        finalLine.splice(Math.max(0, finalLine.length - 1), 1, "…");
-        chars.length = 0;
-      }
-      lines.push(finalLine.join("").trim());
+  while (chars.length && lines.length < maxLines) {
+    if (measureHeadlineWidth(chars.join(""), fontSize) <= maxWidth) {
+      lines.push(chars.splice(0).join("").trim());
       break;
     }
 
-    const target = Math.min(maxCharsPerLine, Math.ceil(chars.length / remainingLines));
-    const lowerBound = Math.max(2, target - 4);
-    const upperBound = Math.min(maxCharsPerLine, target + 4, chars.length - (remainingLines - 1));
-    let breakAt = target;
-    let bestDistance = Number.POSITIVE_INFINITY;
+    let take = 0;
+    while (take < chars.length && measureHeadlineWidth(chars.slice(0, take + 1).join(""), fontSize) <= maxWidth) {
+      take += 1;
+    }
+    take = Math.max(1, take);
 
-    for (let index = lowerBound; index <= upperBound; index += 1) {
-      const before = chars[index - 1] || "";
-      const after = chars[index] || "";
-      if (!/[\s，。！？、：；,.!?;:]/u.test(before) && !/\s/u.test(after)) {
-        continue;
+    if (lines.length === maxLines - 1) {
+      const finalChars = chars.slice(0, take);
+      truncated = take < chars.length;
+      if (truncated) {
+        while (finalChars.length > 1 && measureHeadlineWidth(`${finalChars.join("")}…`, fontSize) > maxWidth) {
+          finalChars.pop();
+        }
+        finalChars.push("…");
       }
-      const distance = Math.abs(index - target);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        breakAt = index;
-      }
+      lines.push(finalChars.join("").trim());
+      chars.length = 0;
+      break;
     }
 
-    lines.push(chars.splice(0, breakAt).join("").trim());
+    const lowerBound = Math.max(2, Math.floor(take * 0.62));
+    for (let index = take; index >= lowerBound; index -= 1) {
+      if (/^[\s，。！？、：；,.!?;:]$/u.test(chars[index - 1] || "")) {
+        take = index;
+        break;
+      }
+    }
+    lines.push(chars.splice(0, take).join("").trim());
+    while (/^\s$/u.test(chars[0] || "")) {
+      chars.shift();
+    }
   }
-  return lines.filter(Boolean).length ? lines.filter(Boolean) : ["未命名標題"];
+
+  return {
+    lines: lines.filter(Boolean).length ? lines.filter(Boolean) : ["未命名標題"],
+    truncated
+  };
+}
+
+function fitHeadlineLayout(value, options) {
+  const {
+    maxWidth,
+    maxHeight,
+    preferredFontSize,
+    minFontSize,
+    maxLines,
+    lineHeightRatio = 1.2
+  } = options;
+  let fallback = null;
+
+  for (let fontSize = preferredFontSize; fontSize >= minFontSize; fontSize -= 2) {
+    const wrapped = wrapHeadlineByWidth(value, maxWidth, fontSize, maxLines);
+    const lineHeight = Math.round(fontSize * lineHeightRatio);
+    const blockHeight = lineHeight * wrapped.lines.length;
+    const result = {
+      ...wrapped,
+      fontSize,
+      lineHeight,
+      blockHeight,
+      lineWidths: wrapped.lines.map((line) => measureHeadlineWidth(line, fontSize))
+    };
+    fallback = result;
+    if (!wrapped.truncated && blockHeight <= maxHeight) {
+      return result;
+    }
+  }
+
+  return fallback;
 }
 
 function stableTextHash(value) {
   return Array.from(String(value || "")).reduce((hash, char) => ((hash * 31) + char.codePointAt(0)) >>> 0, 7);
+}
+
+function measureHeadlineWidth(value, fontSize) {
+  if (!bundledCjkTypeface) {
+    return Array.from(String(value || "")).length * fontSize;
+  }
+  const run = bundledCjkTypeface.layout(String(value || ""));
+  const advance = run.positions.reduce((sum, position) => sum + position.xAdvance, 0);
+  return advance * fontSize / bundledCjkTypeface.unitsPerEm;
 }
 
 function buildCreativeSvgDataUrl({ platformMeta, style, talent, productName, title, bodyText, cta }) {
@@ -1090,6 +1155,8 @@ module.exports = {
   buildCreativeAsset,
   buildCreativePrompt,
   buildHeadlineMarkup,
+  fitHeadlineLayout,
+  measureHeadlineWidth,
   generateCreativeAsset,
   getCreativeImageModelLabel,
   getCreativeModelConfig,

@@ -507,7 +507,7 @@ test("internal generate-review accepts text card mode and carries its headline t
       headers: { Origin: "https://jardinitsai168.github.io" },
       body: buildReviewForm({
         assetMode: "text_card",
-        assetHeadline: "五秒完成設定"
+        assetHeadline: "拒絕無效發送，讓每一封簡訊都具備行銷實質效益"
       })
     });
     const payload = await response.json();
@@ -516,9 +516,15 @@ test("internal generate-review accepts text card mode and carries its headline t
     assert.equal(payload.promptVersion, "v1.1.0");
     assert.ok(payload.creatives.every((creative) => creative.assetMode === "text_card"));
     assert.ok(payload.creatives.every((creative) => creative.appliedParameters.assetMode === "text_card"));
-    assert.ok(payload.creatives.every((creative) => creative.appliedParameters.assetHeadline === "五秒完成設定"));
+    assert.ok(payload.creatives.every((creative) => creative.appliedParameters.assetHeadline === "拒絕無效發送，讓每一封簡訊都具備行銷實質效益"));
     assert.ok(payload.creatives.every((creative) => creative.deliveryNote.includes("純字卡")));
     assert.ok(payload.creatives.every((creative) => creative.squareAsset.mimeType === "image/png"));
+    const reviewBuffers = await Promise.all(payload.creatives.map(async (creative) => {
+      const assetResponse = await fetch(creative.squareAsset.url);
+      assert.equal(assetResponse.status, 200);
+      return Buffer.from(await assetResponse.arrayBuffer());
+    }));
+    assert.equal(new Set(reviewBuffers.map((buffer) => buffer.toString("base64"))).size, 3);
 
     const formatsResponse = await fetch(`${baseUrl}/internal/generate-formats`, {
       method: "POST",
@@ -535,8 +541,12 @@ test("internal generate-review accepts text card mode and carries its headline t
     const formatsPayload = await formatsResponse.json();
     assert.equal(formatsResponse.status, 200);
     assert.equal(formatsPayload.appliedParameters.assetMode, "text_card");
-    assert.equal(formatsPayload.appliedParameters.assetHeadline, "五秒完成設定");
+    assert.equal(formatsPayload.appliedParameters.assetHeadline, "拒絕無效發送，讓每一封簡訊都具備行銷實質效益");
     assert.ok(formatsPayload.assetDeliverables.every((asset) => asset.mimeType === "image/png"));
+    const facebookAssetResponse = await fetch(formatsPayload.assetDeliverables[0].url);
+    assert.equal(facebookAssetResponse.status, 200);
+    const facebookBuffer = Buffer.from(await facebookAssetResponse.arrayBuffer());
+    assert.deepEqual(facebookBuffer, reviewBuffers[0]);
   } finally {
     await stopServer(server);
   }

@@ -191,6 +191,8 @@ const CREATIVE_IMAGE_MODEL_CONFIG = {
   "openai/gpt-5.4-image-2": { label: "GPT-5.4 Image 2", kind: "image" }
 };
 
+const CREATIVE_ASSET_MODES = new Set(["standard", "text_card", "image_headline"]);
+
 function normalizeCreativePlatform(value) {
   return Object.prototype.hasOwnProperty.call(CREATIVE_PLATFORM_META, value) ? value : "facebook";
 }
@@ -201,6 +203,11 @@ function normalizeCreativeStyle(value) {
 
 function normalizeCreativeModel(value) {
   return Object.prototype.hasOwnProperty.call(CREATIVE_MODEL_CONFIG, value) ? value : "none";
+}
+
+function normalizeCreativeAssetMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CREATIVE_ASSET_MODES.has(normalized) ? normalized : "standard";
 }
 
 function normalizeCreativeImageModel(value) {
@@ -243,10 +250,11 @@ function normalizeCreativeInput(body = {}) {
   const style = normalizeCreativeStyle(body?.config?.style);
   const talent = normalizeCreativeModel(body?.config?.talent || body?.config?.model);
   const imageModel = normalizeCreativeImageModel(body?.config?.imageModel);
+  const assetMode = normalizeCreativeAssetMode(body?.config?.assetMode ?? body?.assetMode);
   const platformMeta = getCreativePlatformMeta(platform);
   const productName = String(body?.productName || "未命名產品").trim();
   const primaryCopy = compactCreativeText(body?.primaryCopy || "");
-  const title = compactCreativeText(body?.source?.title || productName);
+  const title = compactCreativeText(body?.config?.headline || body?.assetHeadline || body?.source?.title || productName);
   const bodyText = compactCreativeText(body?.source?.body || primaryCopy || "");
   const cta = compactCreativeText(body?.source?.cta || "了解更多");
   const benefitPoints = resolveCreativeBenefitPoints(body);
@@ -261,6 +269,7 @@ function normalizeCreativeInput(body = {}) {
     style,
     talent,
     imageModel,
+    assetMode,
     productName,
     primaryCopy,
     title,
@@ -275,7 +284,7 @@ function normalizeCreativeInput(body = {}) {
 
 function buildCreativePrompt(body = {}) {
   const input = isNormalizedCreativeInput(body) ? body : normalizeCreativeInput(body);
-  const { platformMeta, productName, primaryCopy, title, bodyText, style, talent, benefitPoints, talentSelections, references } = input;
+  const { platformMeta, productName, primaryCopy, title, bodyText, style, talent, benefitPoints, talentSelections, references, assetMode } = input;
   const styleConfig = CREATIVE_STYLE_CONFIG[style];
   const talentConfig = CREATIVE_MODEL_CONFIG[talent];
   const variants = input.variantSelections;
@@ -301,6 +310,17 @@ function buildCreativePrompt(body = {}) {
     referenceInstructions.push("有提供 logo 參考：若畫面適合放品牌識別，請盡量沿用這個 logo 的造型、字樣與品牌視覺，不要自行重畫成別的品牌。");
   }
 
+  const imageHeadlineRules = assetMode === "image_headline"
+    ? [
+        "這張圖會由系統另外疊加標題區塊，因此生成的背景圖內不要出現任何文字、字母、數字、logo 字樣或模擬文字。",
+        "請在畫面上方或左上方保留乾淨、低細節的安全區，方便後續放置高對比標題；人物臉部、產品主體與關鍵物件不可進入該區。"
+      ]
+    : [
+        "圖上文案規則：1. 圖上不能只有產品名或一句空泛標題，至少要放 2 到 3 個和賣點相關的短文案。2. 這 2 到 3 個賣點必須優先從主文案與提供的產品優點中萃取，不要自行發明新的功效或承諾。3. 每個賣點請寫成短句、短標籤或短 bullet，重點清楚、好掃讀，不要整段長文。4. 除了主標外，畫面上至少還要看得到 2 個賣點；如果版面足夠，最多可放到 3 個。",
+        benefitLines.length ? "建議優先使用以下賣點：" : "若可萃取到賣點，請優先轉成 2 到 3 個短句放上圖。",
+        ...benefitLines
+      ];
+
   return [
     sizeInstruction,
     "文案 -",
@@ -313,9 +333,7 @@ function buildCreativePrompt(body = {}) {
     `模特兒設定：${talentConfig.label}`,
     `模特兒骨架：${talentConfig.foundation}`,
     `本次模特兒變體請採用以下組合：\n${Object.entries(talentSelections).map(([key, value]) => `- ${getTalentDimensionLabel(key)}：${value}`).join("\n")}`,
-    "圖上文案規則：1. 圖上不能只有產品名或一句空泛標題，至少要放 2 到 3 個和賣點相關的短文案。2. 這 2 到 3 個賣點必須優先從主文案與提供的產品優點中萃取，不要自行發明新的功效或承諾。3. 每個賣點請寫成短句、短標籤或短 bullet，重點清楚、好掃讀，不要整段長文。4. 除了主標外，畫面上至少還要看得到 2 個賣點；如果版面足夠，最多可放到 3 個。",
-    benefitLines.length ? "建議優先使用以下賣點：" : "若可萃取到賣點，請優先轉成 2 到 3 個短句放上圖。",
-    ...benefitLines,
+    ...imageHeadlineRules,
     ...referenceInstructions,
     "這張圖會和外部文案一起投放，圖片的任務是先吸引注意，不是把所有文案完整排進圖內。",
     "同一風格下請優先做出和常見結果不同的變體，不要重複常見的背景色、構圖與版面配置。",
@@ -331,6 +349,19 @@ async function generateCreativeAsset(body = {}, options = {}) {
   const input = normalizeCreativeInput(body);
   const prompt = buildCreativePrompt(input);
   const fallbackAsset = buildFallbackCreativeAsset(input, prompt);
+
+  if (input.assetMode === "text_card") {
+    const rendered = await rasterizeCreativeSvgDataUrl(fallbackAsset.imageUrl);
+    return {
+      ...fallbackAsset,
+      imageUrl: rendered.imageUrl,
+      mimeType: rendered.mimeType,
+      mode: "live",
+      provider: "system-text-card",
+      imageModel: "",
+      usage: null
+    };
+  }
   const providerConfig = resolveCreativeProviderConfig({
     model: input.imageModel,
     ...options
@@ -346,10 +377,16 @@ async function generateCreativeAsset(body = {}, options = {}) {
 
   try {
     const imageResult = await generateImageWithFallback(prompt, input, providerConfig);
+    const composedImageUrl = input.assetMode === "image_headline"
+      ? buildImageHeadlineDataUrl(imageResult.imageUrl, input)
+      : imageResult.imageUrl;
+    const rendered = input.assetMode === "image_headline"
+      ? await rasterizeCreativeSvgDataUrl(composedImageUrl)
+      : { imageUrl: composedImageUrl, mimeType: imageResult.mimeType };
     return {
       ...fallbackAsset,
-      imageUrl: imageResult.imageUrl,
-      mimeType: imageResult.mimeType,
+      imageUrl: rendered.imageUrl,
+      mimeType: rendered.mimeType,
       mode: "live",
       provider: imageResult.provider,
       imageModel: imageResult.model,
@@ -379,6 +416,7 @@ function isNormalizedCreativeInput(value) {
     value &&
     value.platformMeta &&
     value.variantSelections &&
+    value.assetMode &&
     value.talentSelections &&
     Array.isArray(value.benefitPoints)
   );
@@ -721,7 +759,13 @@ function conformImageToPlatformFrame(imageUrl, mimeType, platformMeta) {
 
 
 function buildFallbackCreativeAsset(input, prompt) {
-  const { platform, platformMeta, style, talent, imageModel, productName, title, bodyText, cta, variantSelections, talentSelections } = input;
+  const { platform, platformMeta, style, talent, imageModel, productName, title, bodyText, cta, variantSelections, talentSelections, assetMode } = input;
+  const standardFallback = buildCreativeSvgDataUrl({ platformMeta, style, talent, productName, title, bodyText, cta });
+  const imageUrl = assetMode === "text_card"
+    ? buildTextCardDataUrl(input)
+    : assetMode === "image_headline"
+      ? buildImageHeadlineDataUrl(standardFallback, input)
+      : standardFallback;
   return {
     platform,
     platformLabel: platformMeta.label,
@@ -731,12 +775,136 @@ function buildFallbackCreativeAsset(input, prompt) {
     talent,
     model: talent,
     imageModel,
+    assetMode,
+    headline: title,
     variantSelections,
     talentSelections,
     prompt,
-    imageUrl: buildCreativeSvgDataUrl({ platformMeta, style, talent, productName, title, bodyText, cta }),
+    imageUrl,
+    mimeType: assetMode === "standard" ? "image/svg+xml" : "image/svg+xml",
     alt: `${productName} ${platformMeta.label} 素材預覽`
   };
+}
+
+function buildTextCardDataUrl(input) {
+  const { platformMeta, title, style, references } = input;
+  const width = platformMeta.width;
+  const height = platformMeta.height;
+  const variantIndex = stableTextHash(`${title}:${style}:${platformMeta.aspectRatio}`) % 4;
+  const themes = [
+    { background: "#FFF5F8", panel: "#FFFDFD", ink: "#1A1A5E", accent: "#FF6B9D", border: "#1A1A5E" },
+    { background: "#1A1A5E", panel: "#27276F", ink: "#FFF8FB", accent: "#FF8DB4", border: "#FF8DB4" },
+    { background: "#FFD9E7", panel: "#FFF9FB", ink: "#171750", accent: "#D93675", border: "#171750" },
+    { background: "#FFF0C7", panel: "#FFFCF3", ink: "#1A1A5E", accent: "#FF4D88", border: "#1A1A5E" }
+  ];
+  const theme = themes[variantIndex];
+  const isLandscape = width / height > 1.4;
+  const padding = Math.round(Math.min(width, height) * 0.075);
+  const panelX = variantIndex % 2 === 0 ? padding : Math.round(width * 0.08);
+  const panelY = variantIndex === 1 ? Math.round(height * 0.12) : Math.round(height * 0.15);
+  const panelWidth = width - panelX * 2;
+  const panelHeight = height - panelY * 2;
+  const fontSize = Math.round(Math.min(width * (isLandscape ? 0.052 : 0.078), height * 0.12));
+  const maxChars = isLandscape ? 22 : 13;
+  const lines = wrapHeadline(title, maxChars, 4);
+  const lineHeight = Math.round(fontSize * 1.22);
+  const textBlockHeight = lineHeight * lines.length;
+  const textY = Math.round((height - textBlockHeight) / 2 + fontSize * 0.86);
+  const textX = variantIndex === 2 ? panelX + Math.round(panelWidth * 0.1) : width / 2;
+  const anchor = variantIndex === 2 ? "start" : "middle";
+  const logoMarkup = references.logo
+    ? `<image href="${escapeHtml(references.logo.dataUrl)}" x="${padding}" y="${Math.round(padding * 0.68)}" width="${Math.round(width * 0.2)}" height="${Math.round(height * 0.075)}" preserveAspectRatio="xMinYMid meet"/>`
+    : "";
+  const lineMarkup = lines.map((line, index) => `<tspan x="${textX}" y="${textY + index * lineHeight}">${escapeHtml(line)}</tspan>`).join("");
+  const decoration = variantIndex === 0
+    ? `<circle cx="${width - padding}" cy="${height - padding}" r="${Math.round(padding * 0.28)}" fill="${theme.accent}"/><circle cx="${width - padding * 1.65}" cy="${height - padding * 0.75}" r="${Math.round(padding * 0.18)}" fill="${theme.ink}"/>`
+    : variantIndex === 1
+      ? `<path d="M0 ${height * 0.76} L${width} ${height * 0.58} L${width} ${height} L0 ${height}Z" fill="${theme.accent}" opacity="0.2"/>`
+      : variantIndex === 2
+        ? `<rect x="${padding}" y="${panelY + panelHeight * 0.15}" width="${Math.round(padding * 0.16)}" height="${Math.round(panelHeight * 0.7)}" rx="${Math.round(padding * 0.08)}" fill="${theme.accent}"/>`
+        : `<circle cx="${width * 0.85}" cy="${height * 0.18}" r="${Math.min(width, height) * 0.13}" fill="${theme.accent}" opacity="0.22"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${theme.background}"/>${decoration}<rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" rx="${Math.round(Math.min(width, height) * 0.035)}" fill="${theme.panel}" stroke="${theme.border}" stroke-width="${Math.max(2, Math.round(Math.min(width, height) * 0.003))}"/>${logoMarkup}<text text-anchor="${anchor}" font-family="Avenir Next, Noto Sans TC, PingFang TC, sans-serif" font-size="${fontSize}" font-weight="800" letter-spacing="-1" fill="${theme.ink}">${lineMarkup}</text></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function buildImageHeadlineDataUrl(backgroundImageUrl, input) {
+  const { platformMeta, title, style } = input;
+  const width = platformMeta.width;
+  const height = platformMeta.height;
+  const isPortrait = height > width * 1.25;
+  const isLandscape = width > height * 1.4;
+  const boxX = Math.round(width * 0.035);
+  const boxY = Math.round(height * 0.055);
+  const boxWidth = Math.round(width * (isLandscape ? 0.64 : 0.83));
+  const fontSize = Math.round(Math.min(width * (isLandscape ? 0.052 : 0.067), height * (isPortrait ? 0.045 : 0.072)));
+  const lines = wrapHeadline(title, isLandscape ? 22 : isPortrait ? 12 : 15, 3);
+  const lineHeight = Math.round(fontSize * 1.2);
+  const innerPadding = Math.round(fontSize * 0.58);
+  const boxHeight = lineHeight * lines.length + innerPadding * 2;
+  const accent = getCreativePalette(style).cardAccent || "#FF6B9D";
+  const lineMarkup = lines.map((line, index) => `<tspan x="${boxX + innerPadding}" y="${boxY + innerPadding + fontSize + index * lineHeight}">${escapeHtml(line)}</tspan>`).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="${escapeHtml(backgroundImageUrl)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/><rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${Math.round(fontSize * 0.18)}" fill="#FFFDFD" fill-opacity="0.93"/><rect x="${boxX}" y="${boxY}" width="${Math.max(8, Math.round(fontSize * 0.16))}" height="${boxHeight}" rx="${Math.round(fontSize * 0.08)}" fill="${accent}"/><text font-family="Avenir Next, Noto Sans TC, PingFang TC, sans-serif" font-size="${fontSize}" font-weight="800" letter-spacing="-1" fill="#111144">${lineMarkup}</text></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+async function rasterizeCreativeSvgDataUrl(dataUrl) {
+  if (!sharp || !String(dataUrl || "").startsWith("data:image/svg+xml")) {
+    return { imageUrl: dataUrl, mimeType: "image/svg+xml" };
+  }
+  const decoded = decodeDataUrl(dataUrl);
+  if (!decoded) {
+    return { imageUrl: dataUrl, mimeType: "image/svg+xml" };
+  }
+  const buffer = await sharp(decoded.buffer, { density: 144 }).png().toBuffer();
+  return {
+    imageUrl: `data:image/png;base64,${buffer.toString("base64")}`,
+    mimeType: "image/png"
+  };
+}
+
+function wrapHeadline(value, maxCharsPerLine, maxLines) {
+  const chars = Array.from(compactCreativeText(value));
+  const lines = [];
+  const plannedLineCount = Math.min(maxLines, Math.max(1, Math.ceil(chars.length / maxCharsPerLine)));
+
+  while (chars.length && lines.length < plannedLineCount) {
+    const remainingLines = plannedLineCount - lines.length;
+    if (remainingLines === 1) {
+      const finalLine = chars.splice(0, maxCharsPerLine);
+      if (chars.length) {
+        finalLine.splice(Math.max(0, finalLine.length - 1), 1, "…");
+        chars.length = 0;
+      }
+      lines.push(finalLine.join("").trim());
+      break;
+    }
+
+    const target = Math.min(maxCharsPerLine, Math.ceil(chars.length / remainingLines));
+    const lowerBound = Math.max(2, target - 4);
+    const upperBound = Math.min(maxCharsPerLine, target + 4, chars.length - (remainingLines - 1));
+    let breakAt = target;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let index = lowerBound; index <= upperBound; index += 1) {
+      const before = chars[index - 1] || "";
+      const after = chars[index] || "";
+      if (!/[\s，。！？、：；,.!?;:]/u.test(before) && !/\s/u.test(after)) {
+        continue;
+      }
+      const distance = Math.abs(index - target);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        breakAt = index;
+      }
+    }
+
+    lines.push(chars.splice(0, breakAt).join("").trim());
+  }
+  return lines.filter(Boolean).length ? lines.filter(Boolean) : ["未命名標題"];
+}
+
+function stableTextHash(value) {
+  return Array.from(String(value || "")).reduce((hash, char) => ((hash * 31) + char.codePointAt(0)) >>> 0, 7);
 }
 
 function buildCreativeSvgDataUrl({ platformMeta, style, talent, productName, title, bodyText, cta }) {
@@ -849,6 +1017,7 @@ module.exports = {
   getCreativeStyleLabel,
   getCreativeModelLabel,
   normalizeCreativeImageModel,
+  normalizeCreativeAssetMode,
   normalizeCreativePlatform,
   normalizeCreativeStyle,
   normalizeCreativeModel,

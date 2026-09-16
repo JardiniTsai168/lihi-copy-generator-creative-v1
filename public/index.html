@@ -310,6 +310,48 @@
                 <textarea id="creative-primary-copy" rows="7" readonly placeholder="先在左邊產出主文案，這裡會自動帶入。"></textarea>
               </label>
 
+              <fieldset class="fieldset creative-mode-fieldset">
+                <legend>素材形式</legend>
+                <div class="creative-mode-grid" role="radiogroup" aria-label="素材形式">
+                  <label class="creative-mode-card">
+                    <input type="radio" name="creative-asset-mode" value="standard" checked />
+                    <span class="creative-mode-preview creative-mode-preview-standard" aria-hidden="true">
+                      <span></span><i></i><b></b>
+                    </span>
+                    <span class="creative-mode-copy">
+                      <strong>完整素材</strong>
+                      <small>圖片內含完整賣點資訊</small>
+                    </span>
+                  </label>
+                  <label class="creative-mode-card">
+                    <input type="radio" name="creative-asset-mode" value="text_card" />
+                    <span class="creative-mode-preview creative-mode-preview-text" aria-hidden="true">
+                      <span>標題</span>
+                    </span>
+                    <span class="creative-mode-copy">
+                      <strong>純字卡</strong>
+                      <small>多款配色與排版，只放標題</small>
+                    </span>
+                  </label>
+                  <label class="creative-mode-card">
+                    <input type="radio" name="creative-asset-mode" value="image_headline" />
+                    <span class="creative-mode-preview creative-mode-preview-headline" aria-hidden="true">
+                      <span>標題</span><i></i>
+                    </span>
+                    <span class="creative-mode-copy">
+                      <strong>圖片＋標題</strong>
+                      <small>AI 情境圖搭配清楚標題區</small>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+
+              <label class="field creative-headline-field">
+                <span>素材標題</span>
+                <input id="creative-headline" type="text" maxlength="120" placeholder="預設使用系統產出的標題，也可以自行修改" />
+                <p class="field-note">純字卡與圖片＋標題會直接使用這段文字。</p>
+              </label>
+
               <label class="field">
                 <span>快速套用風格包</span>
                 <select id="creative-profile">

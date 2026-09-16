@@ -493,6 +493,78 @@ test("internal generate-review accepts creativeProfile and fine-grained selectio
   }
 });
 
+test("internal generate-review accepts text card mode and carries its headline through the contract", async () => {
+  const bridge = loadBridgeModule({
+    BRIDGE_ALLOWED_ORIGINS: "https://jardinitsai168.github.io",
+    OPENAI_API_KEY: "",
+    OPENROUTER_API_KEY: ""
+  });
+  const { server, baseUrl } = await startServer(bridge.app);
+
+  try {
+    const response = await fetch(`${baseUrl}/internal/generate-review`, {
+      method: "POST",
+      headers: { Origin: "https://jardinitsai168.github.io" },
+      body: buildReviewForm({
+        assetMode: "text_card",
+        assetHeadline: "五秒完成設定"
+      })
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.promptVersion, "v1.1.0");
+    assert.ok(payload.creatives.every((creative) => creative.assetMode === "text_card"));
+    assert.ok(payload.creatives.every((creative) => creative.appliedParameters.assetMode === "text_card"));
+    assert.ok(payload.creatives.every((creative) => creative.appliedParameters.assetHeadline === "五秒完成設定"));
+    assert.ok(payload.creatives.every((creative) => creative.deliveryNote.includes("純字卡")));
+    assert.ok(payload.creatives.every((creative) => creative.squareAsset.mimeType === "image/png"));
+
+    const formatsResponse = await fetch(`${baseUrl}/internal/generate-formats`, {
+      method: "POST",
+      headers: {
+        Origin: "https://jardinitsai168.github.io",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        batchId: payload.batchId,
+        creativeId: payload.creatives[0].creativeId,
+        selectedPlatforms: ["Facebook"]
+      })
+    });
+    const formatsPayload = await formatsResponse.json();
+    assert.equal(formatsResponse.status, 200);
+    assert.equal(formatsPayload.appliedParameters.assetMode, "text_card");
+    assert.equal(formatsPayload.appliedParameters.assetHeadline, "五秒完成設定");
+    assert.ok(formatsPayload.assetDeliverables.every((asset) => asset.mimeType === "image/png"));
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("internal generate-review rejects unknown asset modes", async () => {
+  const bridge = loadBridgeModule({
+    BRIDGE_ALLOWED_ORIGINS: "https://jardinitsai168.github.io",
+    OPENAI_API_KEY: "",
+    OPENROUTER_API_KEY: ""
+  });
+  const { server, baseUrl } = await startServer(bridge.app);
+
+  try {
+    const response = await fetch(`${baseUrl}/internal/generate-review`, {
+      method: "POST",
+      headers: { Origin: "https://jardinitsai168.github.io" },
+      body: buildReviewForm({ assetMode: "unknown_mode" })
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.equal(payload.error.message, "assetMode is invalid");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("internal generate-review rejects invalid recipe overrides", async () => {
   const bridge = loadBridgeModule({
     BRIDGE_ALLOWED_ORIGINS: "https://jardinitsai168.github.io",

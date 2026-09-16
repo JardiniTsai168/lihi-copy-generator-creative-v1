@@ -69,7 +69,9 @@ npm test
   "tone": "brand",
   "voiceBalance": 2,
   "creativeStyle": "luxury",
-  "talent": "family"
+  "talent": "family",
+  "assetMode": "image_headline",
+  "assetHeadline": "自訂素材標題"
 }
 ```
 
@@ -131,6 +133,17 @@ npm test
 - 認證與 secret 安全規則
 - request / response schema 與 Node.js 範例
 - 素材暫存生命週期、錯誤處理與重試策略
+
+## adsdb 素材形式串接
+
+新增純字卡與圖片＋標題模式時，請看 [docs/ADSDB_ASSET_MODES_TECH_SPEC.md](docs/ADSDB_ASSET_MODES_TECH_SPEC.md)。
+
+內容包含：
+
+- `assetMode`／`assetHeadline` 參數
+- review 與 formats 的延續規則
+- 向下相容策略與 adsdb 修改清單
+- request／response 範例與驗收案例
 
 ## 備註
 

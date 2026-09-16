@@ -1,4 +1,4 @@
-const APP_VERSION = "2026-08-24-creative-profile-presets-v1";
+const APP_VERSION = "2026-09-17-asset-modes-v1";
 const STORAGE_KEY = `lihi-copy-last-run:${APP_VERSION}`;
 const appConfig = window.APP_CONFIG || {};
 const GENERATE_COPY_TIMEOUT_MS = 120000;
@@ -104,6 +104,12 @@ const CREATIVE_MODEL_META = {
   senior: "熟齡信任模特兒",
   staff: "專人示範模特兒",
   hand: "只出現手部互動"
+};
+
+const CREATIVE_ASSET_MODE_META = {
+  standard: "完整素材",
+  text_card: "純字卡",
+  image_headline: "圖片＋標題"
 };
 
 const CREATIVE_PROFILE_PRESETS = {
@@ -310,6 +316,8 @@ const surfacePanels = Array.from(document.querySelectorAll("[data-surface-panel]
 const creativePlatformButtons = Array.from(document.querySelectorAll("[data-creative-platform]"));
 
 const creativePrimaryCopy = document.querySelector("#creative-primary-copy");
+const creativeAssetModeInputs = Array.from(document.querySelectorAll("input[name='creative-asset-mode']"));
+const creativeHeadlineInput = document.querySelector("#creative-headline");
 const creativeProfileInput = document.querySelector("#creative-profile");
 const creativeProfileNote = document.querySelector("#creative-profile-note");
 const creativeStyleInput = document.querySelector("#creative-style");
@@ -1323,6 +1331,10 @@ function normalizeRunState(run) {
   const storedCreativeConfig = run.creative?.config
     ? {
         creativeProfile: String(run.creative.config.creativeProfile || "").trim(),
+        assetMode: Object.hasOwn(CREATIVE_ASSET_MODE_META, run.creative.config.assetMode)
+          ? run.creative.config.assetMode
+          : "standard",
+        headline: String(run.creative.config.headline || "").trim(),
         style: run.creative.config.style || "clean",
         talent: run.creative.config.talent || run.creative.config.model || "none",
         variantSelections: normalizeCreativeSelectionRecord(run.creative.config.variantSelections),
@@ -1373,6 +1385,7 @@ function applyCreativeConfigToControls(config = null) {
   const style = String(config?.style || "clean");
   const talent = String(config?.talent || config?.model || "none");
   const creativeProfile = String(config?.creativeProfile || "").trim();
+  const assetMode = Object.hasOwn(CREATIVE_ASSET_MODE_META, config?.assetMode) ? config.assetMode : "standard";
 
   if (creativeProfileInput) {
     creativeProfileInput.value = Object.hasOwn(CREATIVE_PROFILE_PRESETS, creativeProfile) ? creativeProfile : "";
@@ -1382,6 +1395,12 @@ function applyCreativeConfigToControls(config = null) {
   }
   if (creativeModelInput) {
     creativeModelInput.value = Object.hasOwn(CREATIVE_MODEL_META, talent) ? talent : "none";
+  }
+  creativeAssetModeInputs.forEach((input) => {
+    input.checked = input.value === assetMode;
+  });
+  if (creativeHeadlineInput) {
+    creativeHeadlineInput.value = String(config?.headline || currentRun?.outputs?.primary?.title || "").trim();
   }
 
   syncCreativeAdvancedOptions({
@@ -1472,6 +1491,9 @@ function syncCreativePrimaryCopy() {
   }
 
   creativePrimaryCopy.value = getPrimaryCreativeCopy();
+  if (creativeHeadlineInput && !creativeHeadlineInput.value.trim()) {
+    creativeHeadlineInput.value = String(currentRun?.outputs?.primary?.title || "").trim();
+  }
 }
 
 function setActiveSurface(surface) {
@@ -1513,6 +1535,8 @@ function getCreativeConfig() {
 
   return {
     creativeProfile: String(creativeProfileInput?.value || "").trim(),
+    assetMode: creativeAssetModeInputs.find((input) => input.checked)?.value || "standard",
+    headline: String(creativeHeadlineInput?.value || currentRun?.outputs?.primary?.title || "").trim(),
     style: String(creativeStyleInput?.value || "clean"),
     talent: String(creativeModelInput?.value || "none"),
     variantSelections,
@@ -1653,7 +1677,8 @@ function getCreativeMetaText(asset) {
   const styleLabel = CREATIVE_STYLE_META[asset?.style] || asset?.style || "";
   const talentLabel = CREATIVE_MODEL_META[asset?.talent || asset?.model] || asset?.talent || asset?.model || "";
   const imageModelLabel = CREATIVE_IMAGE_MODEL_META[asset?.imageModel] || asset?.imageModel || "";
-  return [profileLabel, styleLabel, talentLabel, imageModelLabel, asset?.platformLabel].filter(Boolean).join("｜") || "尚未產出素材";
+  const assetModeLabel = CREATIVE_ASSET_MODE_META[asset?.assetMode || currentRun?.creative?.config?.assetMode || "standard"] || "";
+  return [assetModeLabel, profileLabel, styleLabel, talentLabel, imageModelLabel, asset?.platformLabel].filter(Boolean).join("｜") || "尚未產出素材";
 }
 
 function findFirstNumber(value) {
@@ -1828,6 +1853,8 @@ function creativeConfigMatchesStored(config) {
   const nextTalentSelections = normalizeCreativeSelectionRecord(config?.talentSelections);
   return !!stored &&
     stored.creativeProfile === String(config.creativeProfile || "") &&
+    (stored.assetMode || "standard") === (config.assetMode || "standard") &&
+    String(stored.headline || "") === String(config.headline || "") &&
     stored.style === config.style &&
     stored.talent === config.talent &&
     JSON.stringify(storedVariantSelections) === JSON.stringify(nextVariantSelections) &&
@@ -2829,6 +2856,22 @@ creativeProfileInput?.addEventListener("change", () => {
   if (currentRun?.creative?.assets?.[activeCreativePlatform] && !creativeConfigMatchesStored(getCreativeConfig())) {
     renderCreativeEmptyState();
     setCreativeStatus("素材設定已變更，請重新產出。");
+  }
+});
+
+creativeAssetModeInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (currentRun?.creative?.assets?.[activeCreativePlatform] && !creativeConfigMatchesStored(getCreativeConfig())) {
+      renderCreativeEmptyState();
+      setCreativeStatus("素材形式已變更，請重新產出。");
+    }
+  });
+});
+
+creativeHeadlineInput?.addEventListener("input", () => {
+  if (currentRun?.creative?.assets?.[activeCreativePlatform] && !creativeConfigMatchesStored(getCreativeConfig())) {
+    renderCreativeEmptyState();
+    setCreativeStatus("素材標題已變更，請重新產出。");
   }
 });
 

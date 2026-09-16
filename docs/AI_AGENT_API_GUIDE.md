@@ -111,6 +111,8 @@ Content-Type: multipart/form-data
 - `creativeProfile`：完整視覺 preset。
 - `creativeStyle`：`clean`、`bold`、`warm`、`luxury`、`saas`。
 - `talent`：`none`、`adult`、`family`、`couple`、`senior`、`staff`、`hand`。
+- `assetMode`：`standard`（既有完整素材，預設）、`text_card`（純字卡）、`image_headline`（圖片＋系統標題區）。
+- `assetHeadline`：選填素材標題，最多 120 字；省略時使用各候選的系統標題。
 - `variantSelections`：JSON 物件字串，微調視覺構圖；值必須符合所選 `creativeStyle` 的合法選項。
 - `talentSelections`：JSON 物件字串，微調人物設定；值必須符合所選 `talent` 的合法選項。
 
@@ -207,7 +209,7 @@ export async function generateReview({
 ```json
 {
   "batchId": "batch_...",
-  "promptVersion": "v1.0.0",
+  "promptVersion": "v1.1.0",
   "creatives": [
     {
       "creativeId": "creative_001",
@@ -220,6 +222,7 @@ export async function generateReview({
       "stylePreset": "scenario_solution",
       "creativeStyle": "clean",
       "talent": "staff",
+      "assetMode": "image_headline",
       "tone": "conversion",
       "voiceBalance": 4,
       "visualMode": "benefit_focus",
@@ -234,6 +237,8 @@ export async function generateReview({
         "creativeProfile": "ugc_staff_demo_v1",
         "creativeStyle": "clean",
         "talent": "staff",
+        "assetMode": "image_headline",
+        "assetHeadline": "候選標題",
         "variantSelections": {},
         "talentSelections": {}
       },
@@ -336,6 +341,8 @@ export async function generateFormats({
     "creativeProfile": "ugc_staff_demo_v1",
     "creativeStyle": "clean",
     "talent": "staff",
+    "assetMode": "image_headline",
+    "assetHeadline": "候選標題",
     "variantSelections": {},
     "talentSelections": {}
   },
@@ -483,6 +490,8 @@ Request 必須包含：
     "benefits": ["優點一", "優點二", "優點三"]
   },
   "config": {
+    "assetMode": "image_headline",
+    "headline": "要直接印在素材上的標題",
     "style": "clean",
     "talent": "none",
     "imageModel": "openai/gpt-5.4-image-2"
@@ -588,4 +597,3 @@ Agent 錯誤策略：
 - 沒有取消生成中的 job endpoint。
 - 沒有 idempotency key；agent 必須避免重複呼叫。
 - production 尚未承諾固定 rate-limit header；agent 不可假設無限制使用。
-

@@ -21,6 +21,76 @@ test("creative engine resolves the GPT image model and normalizes unknown values
   );
 });
 
+test("creative engine renders text cards locally without calling the image provider", async () => {
+  let providerCalled = false;
+  const asset = await creativeEngine.generateCreativeAsset(
+    {
+      productName: "LIHI 短網址",
+      platform: "facebook",
+      source: { title: "五秒完成你的短網址" },
+      config: {
+        assetMode: "text_card",
+        headline: "五秒完成你的短網址",
+        style: "clean",
+        talent: "none"
+      }
+    },
+    {
+      apiKey: "test-key",
+      fetchImpl: async () => {
+        providerCalled = true;
+        throw new Error("provider should not be called");
+      }
+    }
+  );
+
+  assert.equal(providerCalled, false);
+  assert.equal(asset.mode, "live");
+  assert.equal(asset.provider, "system-text-card");
+  assert.equal(asset.assetMode, "text_card");
+  assert.equal(asset.headline, "五秒完成你的短網址");
+  assert.match(asset.imageUrl, /^data:image\/png;base64,/);
+  assert.equal(asset.mimeType, "image/png");
+});
+
+test("image headline mode asks for a text-free background and overlays the supplied headline", async () => {
+  let capturedPrompt = "";
+  const asset = await creativeEngine.generateCreativeAsset(
+    {
+      productName: "WiFi QR Code",
+      platform: "google_ads",
+      primaryCopy: "讓客人一掃就連上",
+      source: { title: "系統標題" },
+      config: {
+        assetMode: "image_headline",
+        headline: "不要再讓客人輸入長密碼",
+        style: "warm",
+        talent: "adult"
+      }
+    },
+    {
+      apiKey: "test-key",
+      fetchImpl: async (_url, options) => {
+        capturedPrompt = JSON.parse(String(options.body || "{}")).prompt;
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            data: [{ b64_json: "ZmFrZQ==", media_type: "image/png" }],
+            usage: { cost: 0.01 }
+          })
+        };
+      }
+    }
+  );
+
+  assert.match(capturedPrompt, /背景圖內不要出現任何文字/);
+  assert.match(capturedPrompt, /保留乾淨、低細節的安全區/);
+  assert.equal(asset.assetMode, "image_headline");
+  assert.equal(asset.headline, "不要再讓客人輸入長密碼");
+  assert.equal(asset.mimeType, "image/png");
+  assert.match(asset.imageUrl, /^data:image\/png;base64,/);
+});
+
 test("creative prompt keeps soft guidance and traditional Chinese constraint", () => {
   const prompt = creativeEngine.buildCreativePrompt({
     productName: "南瓜濃湯",

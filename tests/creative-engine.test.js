@@ -107,6 +107,26 @@ test("text-card candidates use their layout seed to produce distinct designs", a
   assert.equal(new Set(imageUrls).size, 3);
 });
 
+test("Creative Studio request nonces produce different text-card designs", async () => {
+  const imageUrls = await Promise.all(["studio_0", "studio_1"].map(async (requestNonce) => {
+    const asset = await creativeEngine.generateCreativeAsset({
+      requestNonce,
+      productName: "LIHI 簡訊",
+      platform: "facebook",
+      source: { title: "拒絕無效發送" },
+      config: {
+        assetMode: "text_card",
+        headline: "拒絕無效發送",
+        style: "clean",
+        talent: "none"
+      }
+    }, { apiKey: "test-key" });
+    return asset.imageUrl;
+  }));
+
+  assert.equal(new Set(imageUrls).size, 2);
+});
+
 test("image headline mode asks for a text-free background and overlays the supplied headline", async () => {
   let capturedPrompt = "";
   const asset = await creativeEngine.generateCreativeAsset(

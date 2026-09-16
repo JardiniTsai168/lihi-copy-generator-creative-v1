@@ -1339,6 +1339,7 @@ function normalizeRunState(run) {
         talent: run.creative.config.talent || run.creative.config.model || "none",
         variantSelections: normalizeCreativeSelectionRecord(run.creative.config.variantSelections),
         talentSelections: normalizeCreativeSelectionRecord(run.creative.config.talentSelections),
+        layoutSeed: String(run.creative.config.layoutSeed || "").trim(),
         imageModel: CREATIVE_IMAGE_MODEL_META[run.creative.config.imageModel]
           ? run.creative.config.imageModel
           : "openai/gpt-5.4-image-2"
@@ -1586,6 +1587,12 @@ function getCreativeTimeoutMs(config = {}) {
 function buildCreativeRequest(platform = activeCreativePlatform, options = {}) {
   const { forceRegenerate = false } = options;
   const config = getCreativeConfig();
+  if (config.assetMode === "text_card") {
+    const previousLayoutSeed = String(currentRun?.creative?.config?.layoutSeed || "").trim();
+    config.layoutSeed = platform === "facebook" && forceRegenerate
+      ? getNextTextCardLayoutSeed(previousLayoutSeed)
+      : previousLayoutSeed || "studio_0";
+  }
   const references = getCreativeReferences();
   syncCurrentRunReferences(references);
   return {
@@ -1606,6 +1613,12 @@ function buildCreativeRequest(platform = activeCreativePlatform, options = {}) {
       benefits: currentRun?.input?.benefits || []
     }
   };
+}
+
+function getNextTextCardLayoutSeed(previousLayoutSeed) {
+  const match = /^studio_(\d+)$/u.exec(String(previousLayoutSeed || ""));
+  const previousIndex = match ? Number(match[1]) : -1;
+  return `studio_${(previousIndex + 1) % 4}`;
 }
 
 function syncCurrentRunReferences(references = getCreativeReferences()) {
@@ -2278,12 +2291,13 @@ async function requestCreativeAsset(platform = activeCreativePlatform, options =
 
   try {
     const timeoutMs = getCreativeTimeoutMs(config);
+    const creativeRequest = buildCreativeRequest(platform, { forceRegenerate });
     const { response, result } = await fetchJsonWithTimeout(
       getApiUrl("generate-creative"),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildCreativeRequest(platform, { forceRegenerate }))
+        body: JSON.stringify(creativeRequest)
       },
       timeoutMs
     );
@@ -2293,7 +2307,10 @@ async function requestCreativeAsset(platform = activeCreativePlatform, options =
     }
 
     currentRun = normalizeRunState(currentRun);
-    currentRun.creative.config = config;
+    currentRun.creative.config = {
+      ...config,
+      layoutSeed: String(creativeRequest.config?.layoutSeed || "").trim()
+    };
     currentRun.creative.assets[platform] = result.asset;
     saveLastRun(currentRun);
     renderCreativeAsset(result.asset);

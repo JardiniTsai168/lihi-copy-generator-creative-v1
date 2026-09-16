@@ -6,6 +6,7 @@ const OPENROUTER_IMAGE_API_URL = "https://openrouter.ai/api/v1/images";
 let sharp = null;
 let Resvg = null;
 let bundledCjkFont = null;
+let bundledCjkTypeface = null;
 
 try {
   sharp = require("sharp");
@@ -17,9 +18,11 @@ try {
   ({ Resvg } = require("@resvg/resvg-js"));
   const fontPackageRoot = path.resolve(path.dirname(require.resolve("@embedpdf/fonts-tc")), "..");
   bundledCjkFont = fs.readFileSync(path.join(fontPackageRoot, "fonts", "NotoSansHant-Bold.otf"));
+  bundledCjkTypeface = require("fontkit").create(bundledCjkFont);
 } catch {
   Resvg = null;
   bundledCjkFont = null;
+  bundledCjkTypeface = null;
 }
 const CREATIVE_PLATFORM_META = {
   facebook: { label: "Facebook 主圖", width: 1440, height: 1440, aspectRatio: "1:1", apiAspectRatio: "1:1", resolution: "512", sizeLabel: "1440 x 1440 1:1" },
@@ -830,7 +833,14 @@ function buildTextCardDataUrl(input) {
   const logoMarkup = references.logo
     ? `<image href="${escapeHtml(references.logo.dataUrl)}" x="${padding}" y="${Math.round(padding * 0.68)}" width="${Math.round(width * 0.2)}" height="${Math.round(height * 0.075)}" preserveAspectRatio="xMinYMid meet"/>`
     : "";
-  const lineMarkup = lines.map((line, index) => `<tspan x="${textX}" y="${textY + index * lineHeight}">${escapeHtml(line)}</tspan>`).join("");
+  const lineMarkup = buildHeadlineMarkup(lines, {
+    x: textX,
+    firstBaselineY: textY,
+    lineHeight,
+    fontSize,
+    anchor,
+    fill: theme.ink
+  });
   const decoration = variantIndex === 0
     ? `<circle cx="${width - padding}" cy="${height - padding}" r="${Math.round(padding * 0.28)}" fill="${theme.accent}"/><circle cx="${width - padding * 1.65}" cy="${height - padding * 0.75}" r="${Math.round(padding * 0.18)}" fill="${theme.ink}"/>`
     : variantIndex === 1
@@ -838,7 +848,7 @@ function buildTextCardDataUrl(input) {
       : variantIndex === 2
         ? `<rect x="${padding}" y="${panelY + panelHeight * 0.15}" width="${Math.round(padding * 0.16)}" height="${Math.round(panelHeight * 0.7)}" rx="${Math.round(padding * 0.08)}" fill="${theme.accent}"/>`
         : `<circle cx="${width * 0.85}" cy="${height * 0.18}" r="${Math.min(width, height) * 0.13}" fill="${theme.accent}" opacity="0.22"/>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${theme.background}"/>${decoration}<rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" rx="${Math.round(Math.min(width, height) * 0.035)}" fill="${theme.panel}" stroke="${theme.border}" stroke-width="${Math.max(2, Math.round(Math.min(width, height) * 0.003))}"/>${logoMarkup}<text text-anchor="${anchor}" font-family="Noto Sans Hant" font-size="${fontSize}" font-weight="700" letter-spacing="-1" fill="${theme.ink}">${lineMarkup}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${theme.background}"/>${decoration}<rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" rx="${Math.round(Math.min(width, height) * 0.035)}" fill="${theme.panel}" stroke="${theme.border}" stroke-width="${Math.max(2, Math.round(Math.min(width, height) * 0.003))}"/>${logoMarkup}${lineMarkup}</svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
@@ -857,9 +867,45 @@ function buildImageHeadlineDataUrl(backgroundImageUrl, input) {
   const innerPadding = Math.round(fontSize * 0.58);
   const boxHeight = lineHeight * lines.length + innerPadding * 2;
   const accent = getCreativePalette(style).cardAccent || "#FF6B9D";
-  const lineMarkup = lines.map((line, index) => `<tspan x="${boxX + innerPadding}" y="${boxY + innerPadding + fontSize + index * lineHeight}">${escapeHtml(line)}</tspan>`).join("");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="${escapeHtml(backgroundImageUrl)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/><rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${Math.round(fontSize * 0.18)}" fill="#FFFDFD" fill-opacity="0.93"/><rect x="${boxX}" y="${boxY}" width="${Math.max(8, Math.round(fontSize * 0.16))}" height="${boxHeight}" rx="${Math.round(fontSize * 0.08)}" fill="${accent}"/><text font-family="Noto Sans Hant" font-size="${fontSize}" font-weight="700" letter-spacing="-1" fill="#111144">${lineMarkup}</text></svg>`;
+  const lineMarkup = buildHeadlineMarkup(lines, {
+    x: boxX + innerPadding,
+    firstBaselineY: boxY + innerPadding + fontSize,
+    lineHeight,
+    fontSize,
+    anchor: "start",
+    fill: "#111144"
+  });
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="${escapeHtml(backgroundImageUrl)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/><rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${Math.round(fontSize * 0.18)}" fill="#FFFDFD" fill-opacity="0.93"/><rect x="${boxX}" y="${boxY}" width="${Math.max(8, Math.round(fontSize * 0.16))}" height="${boxHeight}" rx="${Math.round(fontSize * 0.08)}" fill="${accent}"/>${lineMarkup}</svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function buildHeadlineMarkup(lines, options) {
+  const { x, firstBaselineY, lineHeight, fontSize, anchor, fill } = options;
+  if (!bundledCjkTypeface) {
+    const spans = lines.map((line, index) => `<tspan x="${x}" y="${firstBaselineY + index * lineHeight}">${escapeHtml(line)}</tspan>`).join("");
+    return `<text text-anchor="${anchor}" font-family="Noto Sans Hant" font-size="${fontSize}" font-weight="700" fill="${fill}">${spans}</text>`;
+  }
+
+  const scale = fontSize / bundledCjkTypeface.unitsPerEm;
+  return lines.map((line, index) => {
+    const run = bundledCjkTypeface.layout(line);
+    const totalAdvance = run.positions.reduce((sum, position) => sum + position.xAdvance, 0);
+    const startX = anchor === "middle" ? x - totalAdvance * scale / 2 : x;
+    let cursor = 0;
+    const paths = run.glyphs.map((glyph, glyphIndex) => {
+      const position = run.positions[glyphIndex];
+      const glyphX = cursor + position.xOffset;
+      const glyphY = position.yOffset;
+      cursor += position.xAdvance;
+      return `<path d="${glyph.path.toSVG()}" transform="translate(${formatSvgNumber(glyphX)} ${formatSvgNumber(glyphY)})"/>`;
+    }).join("");
+    const baselineY = firstBaselineY + index * lineHeight;
+    return `<g fill="${fill}" transform="translate(${formatSvgNumber(startX)} ${formatSvgNumber(baselineY)}) scale(${formatSvgNumber(scale)} ${formatSvgNumber(-scale)})">${paths}</g>`;
+  }).join("");
+}
+
+function formatSvgNumber(value) {
+  return Number(value.toFixed(4));
 }
 
 async function rasterizeCreativeSvgDataUrl(dataUrl) {
@@ -882,7 +928,7 @@ async function rasterizeCreativeSvgDataUrl(dataUrl) {
     return {
       imageUrl: `data:image/png;base64,${buffer.toString("base64")}`,
       mimeType: "image/png",
-      renderEngine: "resvg-bundled-cjk"
+      renderEngine: bundledCjkTypeface ? "resvg-cjk-outlines" : "resvg-bundled-cjk"
     };
   }
   if (!sharp) {
@@ -1043,6 +1089,7 @@ function formatError(error) {
 module.exports = {
   buildCreativeAsset,
   buildCreativePrompt,
+  buildHeadlineMarkup,
   generateCreativeAsset,
   getCreativeImageModelLabel,
   getCreativeModelConfig,

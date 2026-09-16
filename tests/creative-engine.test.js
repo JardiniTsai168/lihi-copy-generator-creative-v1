@@ -49,10 +49,24 @@ test("creative engine renders text cards locally without calling the image provi
   assert.equal(asset.provider, "system-text-card");
   assert.equal(asset.assetMode, "text_card");
   assert.equal(asset.headline, "五秒完成你的短網址");
-  assert.equal(asset.renderEngine, "resvg-bundled-cjk");
+  assert.equal(asset.renderEngine, "resvg-cjk-outlines");
   assert.match(asset.imageUrl, /^data:image\/png;base64,/);
   assert.equal(asset.mimeType, "image/png");
-  assert.equal(asset.renderEngine, "resvg-bundled-cjk");
+  assert.equal(asset.renderEngine, "resvg-cjk-outlines");
+});
+
+test("headline renderer converts Traditional Chinese text into portable SVG outlines", () => {
+  const markup = creativeEngine.buildHeadlineMarkup(["中文字型正常顯示"], {
+    x: 100,
+    firstBaselineY: 200,
+    lineHeight: 80,
+    fontSize: 64,
+    anchor: "start",
+    fill: "#111144"
+  });
+
+  assert.match(markup, /<path d="M/);
+  assert.doesNotMatch(markup, /<text|<tspan|中文字型正常顯示/);
 });
 
 test("image headline mode asks for a text-free background and overlays the supplied headline", async () => {

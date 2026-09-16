@@ -49,8 +49,10 @@ test("creative engine renders text cards locally without calling the image provi
   assert.equal(asset.provider, "system-text-card");
   assert.equal(asset.assetMode, "text_card");
   assert.equal(asset.headline, "五秒完成你的短網址");
+  assert.equal(asset.renderEngine, "resvg-bundled-cjk");
   assert.match(asset.imageUrl, /^data:image\/png;base64,/);
   assert.equal(asset.mimeType, "image/png");
+  assert.equal(asset.renderEngine, "resvg-bundled-cjk");
 });
 
 test("image headline mode asks for a text-free background and overlays the supplied headline", async () => {

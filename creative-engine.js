@@ -1,12 +1,25 @@
 "use strict";
 
+const fs = require("node:fs");
+const path = require("node:path");
 const OPENROUTER_IMAGE_API_URL = "https://openrouter.ai/api/v1/images";
 let sharp = null;
+let Resvg = null;
+let bundledCjkFont = null;
 
 try {
   sharp = require("sharp");
 } catch {
   sharp = null;
+}
+
+try {
+  ({ Resvg } = require("@resvg/resvg-js"));
+  const fontPackageRoot = path.resolve(path.dirname(require.resolve("@embedpdf/fonts-tc")), "..");
+  bundledCjkFont = fs.readFileSync(path.join(fontPackageRoot, "fonts", "NotoSansHant-Bold.otf"));
+} catch {
+  Resvg = null;
+  bundledCjkFont = null;
 }
 const CREATIVE_PLATFORM_META = {
   facebook: { label: "Facebook 主圖", width: 1440, height: 1440, aspectRatio: "1:1", apiAspectRatio: "1:1", resolution: "512", sizeLabel: "1440 x 1440 1:1" },
@@ -356,6 +369,7 @@ async function generateCreativeAsset(body = {}, options = {}) {
       ...fallbackAsset,
       imageUrl: rendered.imageUrl,
       mimeType: rendered.mimeType,
+      renderEngine: rendered.renderEngine,
       mode: "live",
       provider: "system-text-card",
       imageModel: "",
@@ -387,6 +401,7 @@ async function generateCreativeAsset(body = {}, options = {}) {
       ...fallbackAsset,
       imageUrl: rendered.imageUrl,
       mimeType: rendered.mimeType,
+      renderEngine: rendered.renderEngine || imageResult.renderEngine || "",
       mode: "live",
       provider: imageResult.provider,
       imageModel: imageResult.model,
@@ -823,7 +838,7 @@ function buildTextCardDataUrl(input) {
       : variantIndex === 2
         ? `<rect x="${padding}" y="${panelY + panelHeight * 0.15}" width="${Math.round(padding * 0.16)}" height="${Math.round(panelHeight * 0.7)}" rx="${Math.round(padding * 0.08)}" fill="${theme.accent}"/>`
         : `<circle cx="${width * 0.85}" cy="${height * 0.18}" r="${Math.min(width, height) * 0.13}" fill="${theme.accent}" opacity="0.22"/>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${theme.background}"/>${decoration}<rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" rx="${Math.round(Math.min(width, height) * 0.035)}" fill="${theme.panel}" stroke="${theme.border}" stroke-width="${Math.max(2, Math.round(Math.min(width, height) * 0.003))}"/>${logoMarkup}<text text-anchor="${anchor}" font-family="Avenir Next, Noto Sans TC, PingFang TC, sans-serif" font-size="${fontSize}" font-weight="800" letter-spacing="-1" fill="${theme.ink}">${lineMarkup}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${theme.background}"/>${decoration}<rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" rx="${Math.round(Math.min(width, height) * 0.035)}" fill="${theme.panel}" stroke="${theme.border}" stroke-width="${Math.max(2, Math.round(Math.min(width, height) * 0.003))}"/>${logoMarkup}<text text-anchor="${anchor}" font-family="Noto Sans Hant" font-size="${fontSize}" font-weight="700" letter-spacing="-1" fill="${theme.ink}">${lineMarkup}</text></svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
@@ -843,22 +858,41 @@ function buildImageHeadlineDataUrl(backgroundImageUrl, input) {
   const boxHeight = lineHeight * lines.length + innerPadding * 2;
   const accent = getCreativePalette(style).cardAccent || "#FF6B9D";
   const lineMarkup = lines.map((line, index) => `<tspan x="${boxX + innerPadding}" y="${boxY + innerPadding + fontSize + index * lineHeight}">${escapeHtml(line)}</tspan>`).join("");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="${escapeHtml(backgroundImageUrl)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/><rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${Math.round(fontSize * 0.18)}" fill="#FFFDFD" fill-opacity="0.93"/><rect x="${boxX}" y="${boxY}" width="${Math.max(8, Math.round(fontSize * 0.16))}" height="${boxHeight}" rx="${Math.round(fontSize * 0.08)}" fill="${accent}"/><text font-family="Avenir Next, Noto Sans TC, PingFang TC, sans-serif" font-size="${fontSize}" font-weight="800" letter-spacing="-1" fill="#111144">${lineMarkup}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="${escapeHtml(backgroundImageUrl)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/><rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${Math.round(fontSize * 0.18)}" fill="#FFFDFD" fill-opacity="0.93"/><rect x="${boxX}" y="${boxY}" width="${Math.max(8, Math.round(fontSize * 0.16))}" height="${boxHeight}" rx="${Math.round(fontSize * 0.08)}" fill="${accent}"/><text font-family="Noto Sans Hant" font-size="${fontSize}" font-weight="700" letter-spacing="-1" fill="#111144">${lineMarkup}</text></svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 async function rasterizeCreativeSvgDataUrl(dataUrl) {
-  if (!sharp || !String(dataUrl || "").startsWith("data:image/svg+xml")) {
-    return { imageUrl: dataUrl, mimeType: "image/svg+xml" };
+  if (!String(dataUrl || "").startsWith("data:image/svg+xml")) {
+    return { imageUrl: dataUrl, mimeType: "image/svg+xml", renderEngine: "none" };
   }
   const decoded = decodeDataUrl(dataUrl);
   if (!decoded) {
-    return { imageUrl: dataUrl, mimeType: "image/svg+xml" };
+    return { imageUrl: dataUrl, mimeType: "image/svg+xml", renderEngine: "none" };
+  }
+  if (Resvg && bundledCjkFont) {
+    const renderer = new Resvg(decoded.buffer.toString("utf8"), {
+      font: {
+        fontBuffers: [bundledCjkFont],
+        defaultFontFamily: "Noto Sans Hant",
+        loadSystemFonts: false
+      }
+    });
+    const buffer = renderer.render().asPng();
+    return {
+      imageUrl: `data:image/png;base64,${buffer.toString("base64")}`,
+      mimeType: "image/png",
+      renderEngine: "resvg-bundled-cjk"
+    };
+  }
+  if (!sharp) {
+    return { imageUrl: dataUrl, mimeType: "image/svg+xml", renderEngine: "none" };
   }
   const buffer = await sharp(decoded.buffer, { density: 144 }).png().toBuffer();
   return {
     imageUrl: `data:image/png;base64,${buffer.toString("base64")}`,
-    mimeType: "image/png"
+    mimeType: "image/png",
+    renderEngine: "sharp-system-font"
   };
 }
 

@@ -507,7 +507,8 @@ test("internal generate-review accepts text card mode and carries its headline t
       headers: { Origin: "https://jardinitsai168.github.io" },
       body: buildReviewForm({
         assetMode: "text_card",
-        assetHeadline: "拒絕無效發送，讓每一封簡訊都具備行銷實質效益"
+        assetHeadline: "拒絕無效發送，讓每一封簡訊都具備行銷實質效益",
+        assetFontStyle: "elegant_serif"
       })
     });
     const payload = await response.json();
@@ -517,6 +518,7 @@ test("internal generate-review accepts text card mode and carries its headline t
     assert.ok(payload.creatives.every((creative) => creative.assetMode === "text_card"));
     assert.ok(payload.creatives.every((creative) => creative.appliedParameters.assetMode === "text_card"));
     assert.ok(payload.creatives.every((creative) => creative.appliedParameters.assetHeadline === "拒絕無效發送，讓每一封簡訊都具備行銷實質效益"));
+    assert.ok(payload.creatives.every((creative) => creative.appliedParameters.assetFontStyle === "elegant_serif"));
     assert.ok(payload.creatives.every((creative) => creative.deliveryNote.includes("純字卡")));
     assert.ok(payload.creatives.every((creative) => creative.squareAsset.mimeType === "image/png"));
     const reviewBuffers = await Promise.all(payload.creatives.map(async (creative) => {
@@ -542,6 +544,7 @@ test("internal generate-review accepts text card mode and carries its headline t
     assert.equal(formatsResponse.status, 200);
     assert.equal(formatsPayload.appliedParameters.assetMode, "text_card");
     assert.equal(formatsPayload.appliedParameters.assetHeadline, "拒絕無效發送，讓每一封簡訊都具備行銷實質效益");
+    assert.equal(formatsPayload.appliedParameters.assetFontStyle, "elegant_serif");
     assert.ok(formatsPayload.assetDeliverables.every((asset) => asset.mimeType === "image/png"));
     const facebookAssetResponse = await fetch(formatsPayload.assetDeliverables[0].url);
     assert.equal(facebookAssetResponse.status, 200);
@@ -570,6 +573,27 @@ test("internal generate-review rejects unknown asset modes", async () => {
 
     assert.equal(response.status, 400);
     assert.equal(payload.error.message, "assetMode is invalid");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("internal generate-review rejects unknown asset font styles", async () => {
+  const bridge = loadBridgeModule({
+    BRIDGE_ALLOWED_ORIGINS: "https://jardinitsai168.github.io",
+    OPENAI_API_KEY: "",
+    OPENROUTER_API_KEY: ""
+  });
+  const { server, baseUrl } = await startServer(bridge.app);
+  try {
+    const response = await fetch(`${baseUrl}/internal/generate-review`, {
+      method: "POST",
+      headers: { Origin: "https://jardinitsai168.github.io" },
+      body: buildReviewForm({ assetFontStyle: "comic_sans" })
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 400);
+    assert.equal(payload.error.message, "assetFontStyle is invalid");
   } finally {
     await stopServer(server);
   }

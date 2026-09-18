@@ -82,6 +82,7 @@ const INTERNAL_OVERRIDE_CREATIVE_STYLE_KEYS = new Set(["clean", "bold", "warm", 
 const INTERNAL_OVERRIDE_TONE_KEYS = new Set(["brand", "conversion"]);
 const INTERNAL_OVERRIDE_TALENT_KEYS = new Set(INTERNAL_REVIEW_TALENT_KEYS);
 const INTERNAL_ASSET_MODE_KEYS = new Set(["standard", "text_card", "image_headline"]);
+const INTERNAL_ASSET_FONT_STYLE_KEYS = new Set(["auto", "bold_sans", "clean_sans", "elegant_serif", "light_sans"]);
 const INTERNAL_REVIEW_STYLE_BEHAVIOR = {
   home_healing: { creativeStyle: "warm", visualMode: "warm_lifestyle" },
   sharing_moment: { creativeStyle: "warm", visualMode: "shared_moment" },
@@ -4141,6 +4142,7 @@ function normalizeInternalReviewInput(req) {
     talent: normalizeOptionalInternalTalent(body.talent ?? body.model),
     assetMode: normalizeOptionalAssetMode(body.assetMode ?? body.asset_mode),
     assetHeadline: normalizeTextField(body.assetHeadline ?? body.asset_headline),
+    assetFontStyle: normalizeOptionalAssetFontStyle(body.assetFontStyle ?? body.asset_font_style),
     variantSelections: parseSelectionObjectField(body.variantSelections ?? body.variant_selections),
     talentSelections: parseSelectionObjectField(body.talentSelections ?? body.talent_selections),
     logo: Array.isArray(files.logo) ? files.logo[0] || null : null,
@@ -4193,6 +4195,9 @@ function validateInternalReviewInput(input) {
   }
   if (Array.from(input.assetHeadline || "").length > 120) {
     return "assetHeadline must be 120 characters or fewer";
+  }
+  if (input.assetFontStyle && !INTERNAL_ASSET_FONT_STYLE_KEYS.has(input.assetFontStyle)) {
+    return "assetFontStyle is invalid";
   }
   const styleForValidation = input.creativeStyle || resolveInternalCreativeProfilePreset(input.creativeProfile)?.creativeStyle || "clean";
   const talentForValidation = input.talent || resolveInternalCreativeProfilePreset(input.creativeProfile)?.talent || "none";
@@ -4253,6 +4258,11 @@ function normalizeOptionalInternalTalent(value) {
 function normalizeOptionalAssetMode(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return INTERNAL_ASSET_MODE_KEYS.has(normalized) ? normalized : normalized ? "__invalid__" : "";
+}
+
+function normalizeOptionalAssetFontStyle(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return INTERNAL_ASSET_FONT_STYLE_KEYS.has(normalized) ? normalized : normalized ? "__invalid__" : "";
 }
 
 function normalizeInternalFormatsInput(input) {
@@ -4397,6 +4407,7 @@ function buildInternalAppliedParameters(input, recipe) {
     talent: recipe.talent,
     assetMode: recipe.assetMode || "standard",
     assetHeadline: recipe.assetHeadline || "",
+    assetFontStyle: recipe.assetFontStyle || "auto",
     variantSelections: { ...(recipe.variantSelections || {}) },
     talentSelections: { ...(recipe.talentSelections || {}) }
   };
@@ -4410,6 +4421,7 @@ function resolveInternalAppliedRecipe(recipe, appliedConfig) {
     talent: String(appliedConfig?.talent || recipe.talent || "").trim(),
     assetMode: String(appliedConfig?.assetMode || recipe.assetMode || "standard").trim(),
     assetHeadline: String(appliedConfig?.headline || recipe.assetHeadline || "").trim(),
+    assetFontStyle: String(appliedConfig?.fontStyle || recipe.assetFontStyle || "auto").trim(),
     variantSelections: { ...(appliedConfig?.variantSelections || recipe.variantSelections || {}) },
     talentSelections: { ...(appliedConfig?.talentSelections || recipe.talentSelections || {}) }
   };
@@ -4468,6 +4480,7 @@ async function generateInternalReviewCreative(batchId, input, recipe, pageAnalys
         talentSelections: recipe.talentSelections || {},
         assetMode: recipe.assetMode || "standard",
         headline: recipe.assetHeadline || bundle.output.title,
+        fontStyle: recipe.assetFontStyle || "auto",
         layoutSeed: recipe.creativeId,
         imageModel: "openai/gpt-5.4-image-2"
       }
@@ -4491,6 +4504,7 @@ async function generateInternalReviewCreative(batchId, input, recipe, pageAnalys
     creativeStyle: resolvedRecipe.creativeStyle,
     talent: resolvedRecipe.talent,
     assetMode: resolvedRecipe.assetMode || "standard",
+    assetFontStyle: resolvedRecipe.assetFontStyle || "auto",
     tone: resolvedRecipe.tone,
     voiceBalance: resolvedRecipe.voiceBalance,
     visualMode: resolvedRecipe.visualMode,
@@ -4566,6 +4580,7 @@ async function createInternalFormatDeliverable(storedBatch, creativeRecord, deli
         talentSelections: creativeRecord.recipe.talentSelections || {},
         assetMode: creativeRecord.recipe.assetMode || "standard",
         headline: creativeRecord.recipe.assetHeadline || channelOutput.title || creativeRecord.primaryOutput.title,
+        fontStyle: creativeRecord.recipe.assetFontStyle || "auto",
         layoutSeed: creativeRecord.recipe.creativeId,
         imageModel: "openai/gpt-5.4-image-2"
       }
@@ -4612,6 +4627,7 @@ async function createInternalAssetFromCreative({
       talent: String(asset?.talent || "").trim(),
       assetMode: String(asset?.assetMode || "standard").trim(),
       headline: String(asset?.headline || "").trim(),
+      fontStyle: String(asset?.fontStyle || "auto").trim(),
       variantSelections: { ...(asset?.variantSelections || {}) },
       talentSelections: { ...(asset?.talentSelections || {}) }
     }
@@ -4807,6 +4823,7 @@ function planInternalReviewRecipes(randomFn = Math.random, overrides = {}) {
       talentSelections,
       assetMode: overrides.assetMode || "standard",
       assetHeadline: overrides.assetHeadline || "",
+      assetFontStyle: overrides.assetFontStyle || "auto",
       visualMode: styleBehavior.visualMode,
       modelSetting: creativeEngine.getCreativeModelLabel(talent)
     };

@@ -113,6 +113,7 @@ Content-Type: multipart/form-data
 - `talent`：`none`、`adult`、`family`、`couple`、`senior`、`staff`、`hand`。
 - `assetMode`：`standard`（既有完整素材，預設）、`text_card`（純字卡）、`image_headline`（圖片＋系統標題區）。
 - `assetHeadline`：選填素材標題，最多 120 字；省略時使用各候選的系統標題。
+- `assetFontStyle`：`auto`（預設）、`bold_sans`、`clean_sans`、`elegant_serif`、`light_sans`；只影響系統排版文字。
 - `variantSelections`：JSON 物件字串，微調視覺構圖；值必須符合所選 `creativeStyle` 的合法選項。
 - `talentSelections`：JSON 物件字串，微調人物設定；值必須符合所選 `talent` 的合法選項。
 
@@ -223,6 +224,7 @@ export async function generateReview({
       "creativeStyle": "clean",
       "talent": "staff",
       "assetMode": "image_headline",
+      "assetFontStyle": "clean_sans",
       "tone": "conversion",
       "voiceBalance": 4,
       "visualMode": "benefit_focus",
@@ -239,6 +241,7 @@ export async function generateReview({
         "talent": "staff",
         "assetMode": "image_headline",
         "assetHeadline": "候選標題",
+        "assetFontStyle": "clean_sans",
         "variantSelections": {},
         "talentSelections": {}
       },

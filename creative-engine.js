@@ -7,6 +7,11 @@ let sharp = null;
 let Resvg = null;
 let bundledCjkFont = null;
 let bundledCjkTypeface = null;
+let bundledFontBuffers = [];
+const bundledTypefaces = new Map();
+const serifTypefaceCache = new Map();
+let serifUnicodeEntries = [];
+let serifFontRoot = "";
 
 try {
   sharp = require("sharp");
@@ -17,8 +22,31 @@ try {
 try {
   ({ Resvg } = require("@resvg/resvg-js"));
   const fontPackageRoot = path.resolve(path.dirname(require.resolve("@embedpdf/fonts-tc")), "..");
-  bundledCjkFont = fs.readFileSync(path.join(fontPackageRoot, "fonts", "NotoSansHant-Bold.otf"));
-  bundledCjkTypeface = require("fontkit").create(bundledCjkFont);
+  const fontkit = require("fontkit");
+  const sansFonts = {
+    bold_sans: "NotoSansHant-Bold.otf",
+    clean_sans: "NotoSansHant-Medium.otf",
+    light_sans: "NotoSansHant-Light.otf"
+  };
+  for (const [fontStyle, fileName] of Object.entries(sansFonts)) {
+    const buffer = fs.readFileSync(path.join(fontPackageRoot, "fonts", fileName));
+    bundledFontBuffers.push(buffer);
+    bundledTypefaces.set(fontStyle, fontkit.create(buffer));
+  }
+  bundledCjkFont = bundledFontBuffers[0];
+  bundledCjkTypeface = bundledTypefaces.get("bold_sans");
+
+  serifFontRoot = path.dirname(require.resolve("@fontsource-variable/noto-serif-tc/package.json"));
+  const serifUnicodeMap = require("@fontsource-variable/noto-serif-tc/unicode.json");
+  serifUnicodeEntries = Object.entries(serifUnicodeMap)
+    .filter(([key]) => /^\[\d+\]$/.test(key))
+    .map(([key, value]) => ({
+      subset: key.slice(1, -1),
+      ranges: String(value).split(",").map((token) => {
+        const [start, end = start] = token.trim().replace(/^U\+/i, "").split("-");
+        return [Number.parseInt(start, 16), Number.parseInt(end, 16)];
+      })
+    }));
 } catch {
   Resvg = null;
   bundledCjkFont = null;
@@ -208,6 +236,8 @@ const CREATIVE_IMAGE_MODEL_CONFIG = {
 };
 
 const CREATIVE_ASSET_MODES = new Set(["standard", "text_card", "image_headline"]);
+const CREATIVE_FONT_STYLES = new Set(["auto", "bold_sans", "clean_sans", "elegant_serif", "light_sans"]);
+const AUTOMATIC_FONT_STYLES = ["bold_sans", "clean_sans", "elegant_serif", "light_sans"];
 
 function normalizeCreativePlatform(value) {
   return Object.prototype.hasOwnProperty.call(CREATIVE_PLATFORM_META, value) ? value : "facebook";
@@ -224,6 +254,19 @@ function normalizeCreativeModel(value) {
 function normalizeCreativeAssetMode(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return CREATIVE_ASSET_MODES.has(normalized) ? normalized : "standard";
+}
+
+function normalizeCreativeFontStyle(value) {
+  const normalized = String(value || "auto").trim().toLowerCase();
+  return CREATIVE_FONT_STYLES.has(normalized) ? normalized : "auto";
+}
+
+function resolveCreativeFontStyle(value, layoutSeed = "") {
+  const normalized = normalizeCreativeFontStyle(value);
+  if (normalized !== "auto") {
+    return normalized;
+  }
+  return AUTOMATIC_FONT_STYLES[stableTextHash(layoutSeed || "default-font") % AUTOMATIC_FONT_STYLES.length];
 }
 
 function normalizeCreativeImageModel(value) {
@@ -268,10 +311,13 @@ function normalizeCreativeInput(body = {}) {
   const imageModel = normalizeCreativeImageModel(body?.config?.imageModel);
   const assetMode = normalizeCreativeAssetMode(body?.config?.assetMode ?? body?.assetMode);
   const layoutSeed = compactCreativeText(body?.config?.layoutSeed || body?.layoutSeed || body?.requestNonce || "");
+  const requestedFontStyle = normalizeCreativeFontStyle(body?.config?.fontStyle ?? body?.config?.assetFontStyle ?? body?.assetFontStyle);
+  const fontStyle = resolveCreativeFontStyle(requestedFontStyle, layoutSeed);
   const platformMeta = getCreativePlatformMeta(platform);
   const productName = String(body?.productName || "未命名產品").trim();
   const primaryCopy = compactCreativeText(body?.primaryCopy || "");
   const title = compactCreativeText(body?.config?.headline || body?.assetHeadline || body?.source?.title || productName);
+  const headlinePlacement = stableTextHash(layoutSeed || `${title}:${style}`) % 2 === 0 ? "left" : "right";
   const bodyText = compactCreativeText(body?.source?.body || primaryCopy || "");
   const cta = compactCreativeText(body?.source?.cta || "了解更多");
   const benefitPoints = resolveCreativeBenefitPoints(body);
@@ -288,6 +334,9 @@ function normalizeCreativeInput(body = {}) {
     imageModel,
     assetMode,
     layoutSeed,
+    requestedFontStyle,
+    fontStyle,
+    headlinePlacement,
     productName,
     primaryCopy,
     title,
@@ -302,7 +351,7 @@ function normalizeCreativeInput(body = {}) {
 
 function buildCreativePrompt(body = {}) {
   const input = isNormalizedCreativeInput(body) ? body : normalizeCreativeInput(body);
-  const { platformMeta, productName, primaryCopy, title, bodyText, style, talent, benefitPoints, talentSelections, references, assetMode } = input;
+  const { platformMeta, productName, primaryCopy, title, bodyText, style, talent, benefitPoints, talentSelections, references, assetMode, headlinePlacement } = input;
   const styleConfig = CREATIVE_STYLE_CONFIG[style];
   const talentConfig = CREATIVE_MODEL_CONFIG[talent];
   const variants = input.variantSelections;
@@ -331,7 +380,8 @@ function buildCreativePrompt(body = {}) {
   const imageHeadlineRules = assetMode === "image_headline"
     ? [
         "這張圖會由系統另外疊加標題區塊，因此生成的背景圖內不要出現任何文字、字母、數字、logo 字樣或模擬文字。",
-        "請在畫面上方或左上方保留乾淨、低細節的安全區，方便後續放置高對比標題；人物臉部、產品主體與關鍵物件不可進入該區。"
+        `請在畫面${headlinePlacement === "right" ? "右上方" : "左上方"}保留至少 45% 畫面寬、30% 畫面高的乾淨、低細節安全區，方便後續放置兩行高對比標題。`,
+        `所有人物、臉部、身體、手部、產品主體與關鍵物件都必須集中在畫面${headlinePlacement === "right" ? "左側" : "右側"}，任何部位都不可進入上述標題安全區。`
       ]
     : [
         "圖上文案規則：1. 圖上不能只有產品名或一句空泛標題，至少要放 2 到 3 個和賣點相關的短文案。2. 這 2 到 3 個賣點必須優先從主文案與提供的產品優點中萃取，不要自行發明新的功效或承諾。3. 每個賣點請寫成短句、短標籤或短 bullet，重點清楚、好掃讀，不要整段長文。4. 除了主標外，畫面上至少還要看得到 2 個賣點；如果版面足夠，最多可放到 3 個。",
@@ -396,8 +446,11 @@ async function generateCreativeAsset(body = {}, options = {}) {
 
   try {
     const imageResult = await generateImageWithFallback(prompt, input, providerConfig);
+    const placementResult = input.assetMode === "image_headline"
+      ? await selectHeadlinePlacement(imageResult.imageUrl, input)
+      : null;
     const composedImageUrl = input.assetMode === "image_headline"
-      ? buildImageHeadlineDataUrl(imageResult.imageUrl, input)
+      ? buildImageHeadlineDataUrl(imageResult.imageUrl, input, placementResult?.placement)
       : imageResult.imageUrl;
     const rendered = input.assetMode === "image_headline"
       ? await rasterizeCreativeSvgDataUrl(composedImageUrl)
@@ -413,7 +466,9 @@ async function generateCreativeAsset(body = {}, options = {}) {
       renderModel: imageResult.renderModel || imageResult.model,
       orchestratorModel: imageResult.orchestratorModel || "",
       prompt: imageResult.prompt || fallbackAsset.prompt,
-      usage: imageResult.usage || null
+      usage: imageResult.usage || null,
+      headlinePlacement: placementResult?.placement || input.headlinePlacement,
+      safeRegionScores: placementResult?.scores || null
     };
   } catch (error) {
     return {
@@ -681,7 +736,9 @@ async function generateImageWithOpenRouter(prompt, input, providerConfig) {
   const mimeType = String(first?.media_type || "image/png");
   const imageUrl = `data:${mimeType};base64,${b64}`;
   return {
-    imageUrl: conformImageToPlatformFrame(imageUrl, mimeType, input.platformMeta),
+    imageUrl: input.assetMode === "image_headline"
+      ? imageUrl
+      : conformImageToPlatformFrame(imageUrl, mimeType, input.platformMeta),
     mimeType,
     usage: parsed?.usage || null,
     provider: "openrouter-image",
@@ -797,6 +854,9 @@ function buildFallbackCreativeAsset(input, prompt) {
     imageModel,
     assetMode,
     headline: title,
+    fontStyle: input.fontStyle,
+    requestedFontStyle: input.requestedFontStyle,
+    headlinePlacement: input.headlinePlacement,
     variantSelections,
     talentSelections,
     prompt,
@@ -807,14 +867,16 @@ function buildFallbackCreativeAsset(input, prompt) {
 }
 
 function buildTextCardDataUrl(input) {
-  const { platformMeta, title, style, references, layoutSeed } = input;
+  const { platformMeta, title, style, references, layoutSeed, fontStyle } = input;
   const width = platformMeta.width;
   const height = platformMeta.height;
   const themes = [
     { background: "#FFF5F8", panel: "#FFFDFD", ink: "#1A1A5E", accent: "#FF6B9D", border: "#1A1A5E" },
     { background: "#1A1A5E", panel: "#27276F", ink: "#FFF8FB", accent: "#FF8DB4", border: "#FF8DB4" },
     { background: "#FFD9E7", panel: "#FFF9FB", ink: "#171750", accent: "#D93675", border: "#171750" },
-    { background: "#FFF0C7", panel: "#FFFCF3", ink: "#1A1A5E", accent: "#FF4D88", border: "#1A1A5E" }
+    { background: "#FFF0C7", panel: "#FFFCF3", ink: "#1A1A5E", accent: "#FF4D88", border: "#1A1A5E" },
+    { background: "#DDEBFF", panel: "#FFF8FB", ink: "#1A1A5E", accent: "#FF6B9D", border: "#1A1A5E" },
+    { background: "#DDF7EE", panel: "#FFFCF7", ink: "#173D46", accent: "#FF6B9D", border: "#173D46" }
   ];
   const variantIndex = stableTextHash(layoutSeed || `${title}:${style}:${platformMeta.aspectRatio}`) % themes.length;
   const theme = themes[variantIndex];
@@ -832,7 +894,8 @@ function buildTextCardDataUrl(input) {
     preferredFontSize,
     minFontSize: Math.max(34, Math.round(preferredFontSize * 0.52)),
     maxLines: isLandscape ? 3 : 4,
-    lineHeightRatio: 1.2
+    lineHeightRatio: fontStyle === "elegant_serif" ? 1.28 : 1.2,
+    fontStyle
   });
   const { lines, fontSize, lineHeight, blockHeight: textBlockHeight } = layout;
   const textY = Math.round((height - textBlockHeight) / 2 + fontSize * 0.88);
@@ -847,37 +910,111 @@ function buildTextCardDataUrl(input) {
     lineHeight,
     fontSize,
     anchor,
-    fill: theme.ink
+    fill: theme.ink,
+    fontStyle
   });
-  const decoration = variantIndex === 0
-    ? `<circle cx="${width - padding}" cy="${height - padding}" r="${Math.round(padding * 0.28)}" fill="${theme.accent}"/><circle cx="${width - padding * 1.65}" cy="${height - padding * 0.75}" r="${Math.round(padding * 0.18)}" fill="${theme.ink}"/>`
-    : variantIndex === 1
-      ? `<path d="M0 ${height * 0.76} L${width} ${height * 0.58} L${width} ${height} L0 ${height}Z" fill="${theme.accent}" opacity="0.2"/>`
-      : variantIndex === 2
-        ? `<rect x="${padding}" y="${panelY + panelHeight * 0.15}" width="${Math.round(padding * 0.16)}" height="${Math.round(panelHeight * 0.7)}" rx="${Math.round(padding * 0.08)}" fill="${theme.accent}"/>`
-        : `<circle cx="${width * 0.85}" cy="${height * 0.18}" r="${Math.min(width, height) * 0.13}" fill="${theme.accent}" opacity="0.22"/>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${theme.background}"/>${decoration}<rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" rx="${Math.round(Math.min(width, height) * 0.035)}" fill="${theme.panel}" stroke="${theme.border}" stroke-width="${Math.max(2, Math.round(Math.min(width, height) * 0.003))}"/>${logoMarkup}${lineMarkup}</svg>`;
+  const backgroundMarkup = buildTextCardBackgroundMarkup(variantIndex, width, height, theme, padding);
+  const panelTransform = variantIndex === 4 ? ` transform="rotate(-1.2 ${width / 2} ${height / 2})"` : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${backgroundMarkup}<rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" rx="${Math.round(Math.min(width, height) * 0.035)}" fill="${theme.panel}" fill-opacity="0.96" stroke="${theme.border}" stroke-width="${Math.max(2, Math.round(Math.min(width, height) * 0.003))}"${panelTransform}/>${logoMarkup}${lineMarkup}</svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function buildImageHeadlineDataUrl(backgroundImageUrl, input) {
-  const { platformMeta, title, style } = input;
+function buildTextCardBackgroundMarkup(variantIndex, width, height, theme, padding) {
+  const unit = Math.max(20, Math.round(Math.min(width, height) * 0.055));
+  const definitions = `<defs><pattern id="dots" width="${unit}" height="${unit}" patternUnits="userSpaceOnUse"><circle cx="${unit * 0.22}" cy="${unit * 0.22}" r="${Math.max(3, unit * 0.07)}" fill="${theme.accent}" opacity="0.34"/></pattern><pattern id="grid" width="${unit * 1.5}" height="${unit * 1.5}" patternUnits="userSpaceOnUse"><path d="M ${unit * 1.5} 0 L 0 0 0 ${unit * 1.5}" fill="none" stroke="${theme.ink}" stroke-width="2" opacity="0.14"/></pattern><linearGradient id="cardGradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${theme.background}"/><stop offset="1" stop-color="${theme.accent}" stop-opacity="0.26"/></linearGradient></defs>`;
+  const designs = [
+    `<rect width="${width}" height="${height}" fill="url(#cardGradient)"/><rect width="${width}" height="${height}" fill="url(#dots)"/><circle cx="${width * 0.91}" cy="${height * 0.12}" r="${unit * 2.4}" fill="${theme.accent}" opacity="0.18"/><circle cx="${width * 0.08}" cy="${height * 0.91}" r="${unit * 1.6}" fill="${theme.ink}" opacity="0.12"/>`,
+    `<rect width="${width}" height="${height}" fill="${theme.background}"/><path d="M0 ${height * 0.18} L${width} 0 L${width} ${height * 0.24} L0 ${height * 0.42}Z" fill="${theme.accent}" opacity="0.32"/><path d="M0 ${height * 0.78} L${width} ${height * 0.56} L${width} ${height} L0 ${height}Z" fill="${theme.ink}" opacity="0.24"/>${Array.from({ length: 8 }, (_, index) => `<line x1="${-width * 0.1 + index * width * 0.18}" y1="0" x2="${width * 0.22 + index * width * 0.18}" y2="${height}" stroke="${theme.accent}" stroke-width="${Math.max(3, unit * 0.07)}" opacity="0.16"/>`).join("")}`,
+    `<rect width="${width}" height="${height}" fill="${theme.background}"/><rect width="${width}" height="${height}" fill="url(#grid)"/><rect x="0" y="${height * 0.08}" width="${width * 0.16}" height="${height * 0.84}" fill="${theme.accent}" opacity="0.28"/><rect x="${width * 0.84}" y="0" width="${width * 0.16}" height="${height}" fill="${theme.ink}" opacity="0.1"/>`,
+    `<rect width="${width}" height="${height}" fill="url(#cardGradient)"/>${Array.from({ length: 12 }, (_, index) => `<path d="M${width / 2} ${height / 2} L${width / 2 + Math.cos(index * Math.PI / 6) * width} ${height / 2 + Math.sin(index * Math.PI / 6) * height}" stroke="${index % 2 ? theme.ink : theme.accent}" stroke-width="${unit * 0.18}" opacity="0.13"/>`).join("")}<circle cx="${width / 2}" cy="${height / 2}" r="${Math.min(width, height) * 0.32}" fill="${theme.background}" opacity="0.58"/>`,
+    `<rect width="${width}" height="${height}" fill="${theme.background}"/>${Array.from({ length: 5 }, (_, row) => Array.from({ length: 5 }, (_, column) => `<rect x="${column * width / 5}" y="${row * height / 5}" width="${width / 5}" height="${height / 5}" fill="${(row + column) % 2 ? theme.accent : theme.ink}" opacity="${(row + column) % 2 ? 0.17 : 0.08}"/>`).join("")).join("")}<rect x="${padding * 0.35}" y="${padding * 0.35}" width="${width - padding * 0.7}" height="${height - padding * 0.7}" rx="${unit}" fill="none" stroke="${theme.accent}" stroke-width="${unit * 0.16}"/>`,
+    `<rect width="${width}" height="${height}" fill="${theme.background}"/><path d="M0 ${height * 0.18} Q${width * 0.25} ${height * 0.02} ${width * 0.5} ${height * 0.18} T${width} ${height * 0.18} L${width} 0 L0 0Z" fill="${theme.accent}" opacity="0.32"/><path d="M0 ${height * 0.82} Q${width * 0.24} ${height * 0.66} ${width * 0.5} ${height * 0.82} T${width} ${height * 0.82} L${width} ${height} L0 ${height}Z" fill="${theme.ink}" opacity="0.18"/>${Array.from({ length: 7 }, (_, index) => `<circle cx="${width * (0.08 + index * 0.14)}" cy="${height * 0.08}" r="${unit * (index % 2 ? 0.18 : 0.28)}" fill="${theme.ink}" opacity="0.32"/>`).join("")}`
+  ];
+  return definitions + designs[variantIndex % designs.length];
+}
+
+async function selectHeadlinePlacement(backgroundImageUrl, input) {
+  if (input.talent && input.talent !== "none") {
+    return { placement: "header", scores: null };
+  }
+  const fallback = input.headlinePlacement || "left";
+  if (!sharp) {
+    return { placement: fallback, scores: null };
+  }
+  try {
+    const decoded = decodeDataUrl(backgroundImageUrl);
+    if (!decoded) {
+      return { placement: fallback, scores: null };
+    }
+    const width = input.platformMeta.width;
+    const height = input.platformMeta.height;
+    const regionWidth = Math.max(1, Math.round(width * 0.5));
+    const regionHeight = Math.max(1, Math.round(height * 0.38));
+    const normalizedImage = await sharp(decoded.buffer).resize(width, height, { fit: "cover" }).png().toBuffer();
+    const [left, right] = await Promise.all([
+      scoreHeadlineSafeRegion(sharp(normalizedImage), { left: 0, top: 0, width: regionWidth, height: regionHeight }),
+      scoreHeadlineSafeRegion(sharp(normalizedImage), { left: width - regionWidth, top: 0, width: regionWidth, height: regionHeight })
+    ]);
+    const preferredBias = Math.max(0.01, Math.min(left, right) * 0.06);
+    const leftAdjusted = left + (fallback === "left" ? 0 : preferredBias);
+    const rightAdjusted = right + (fallback === "right" ? 0 : preferredBias);
+    return {
+      placement: leftAdjusted <= rightAdjusted ? "left" : "right",
+      scores: { left: Number(left.toFixed(3)), right: Number(right.toFixed(3)) }
+    };
+  } catch {
+    return { placement: fallback, scores: null };
+  }
+}
+
+async function scoreHeadlineSafeRegion(image, region) {
+  const { data, info } = await image
+    .extract(region)
+    .resize(96, 64, { fit: "fill" })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let sum = 0;
+  let sumSquares = 0;
+  let edgeTotal = 0;
+  for (let index = 0; index < data.length; index += info.channels) {
+    const value = data[index];
+    sum += value;
+    sumSquares += value * value;
+    const pixelIndex = Math.floor(index / info.channels);
+    const x = pixelIndex % info.width;
+    const y = Math.floor(pixelIndex / info.width);
+    if (x > 0) edgeTotal += Math.abs(value - data[index - info.channels]);
+    if (y > 0) edgeTotal += Math.abs(value - data[index - info.width * info.channels]);
+  }
+  const pixels = info.width * info.height;
+  const variance = Math.max(0, sumSquares / pixels - (sum / pixels) ** 2);
+  return Math.sqrt(variance) + edgeTotal / (pixels * 2);
+}
+
+function buildImageHeadlineDataUrl(backgroundImageUrl, input, placement = input.headlinePlacement || "left") {
+  const { platformMeta, title, style, fontStyle, talent } = input;
   const width = platformMeta.width;
   const height = platformMeta.height;
   const isPortrait = height > width * 1.25;
   const isLandscape = width > height * 1.4;
-  const boxX = Math.round(width * 0.035);
   const boxY = Math.round(height * 0.055);
-  const boxWidth = Math.round(width * (isLandscape ? 0.64 : 0.83));
+  const usesDedicatedHeader = placement === "header" || talent !== "none";
+  const boxWidth = usesDedicatedHeader
+    ? Math.round(width * 0.93)
+    : Math.round(width * (isLandscape ? 0.55 : 0.66));
+  const sideMargin = Math.round(width * 0.035);
+  const boxX = placement === "right" ? width - boxWidth - sideMargin : sideMargin;
   const preferredFontSize = Math.round(Math.min(width * (isLandscape ? 0.052 : 0.067), height * (isPortrait ? 0.045 : 0.072)));
   const horizontalPadding = Math.round(width * (isLandscape ? 0.035 : 0.045));
   const layout = fitHeadlineLayout(title, {
     maxWidth: boxWidth - horizontalPadding * 2,
-    maxHeight: height * (isLandscape ? 0.34 : isPortrait ? 0.24 : 0.28),
+    maxHeight: height * (isLandscape ? 0.28 : isPortrait ? 0.19 : 0.23),
     preferredFontSize,
-    minFontSize: Math.max(32, Math.round(preferredFontSize * 0.52)),
-    maxLines: isLandscape ? 3 : 4,
-    lineHeightRatio: 1.18
+    minFontSize: Math.max(28, Math.round(preferredFontSize * 0.44)),
+    maxLines: 2,
+    lineHeightRatio: fontStyle === "elegant_serif" ? 1.25 : 1.16,
+    fontStyle
   });
   const { lines, fontSize, lineHeight, blockHeight } = layout;
   const innerPadding = Math.max(horizontalPadding, Math.round(fontSize * 0.58));
@@ -889,35 +1026,92 @@ function buildImageHeadlineDataUrl(backgroundImageUrl, input) {
     lineHeight,
     fontSize,
     anchor: "start",
-    fill: "#111144"
+    fill: "#111144",
+    fontStyle
   });
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="${escapeHtml(backgroundImageUrl)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/><rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${Math.round(fontSize * 0.18)}" fill="#FFFDFD" fill-opacity="0.93"/><rect x="${boxX}" y="${boxY}" width="${Math.max(8, Math.round(fontSize * 0.16))}" height="${boxHeight}" rx="${Math.round(fontSize * 0.08)}" fill="${accent}"/>${lineMarkup}</svg>`;
+  const accentX = placement === "right" ? boxX + boxWidth - Math.max(8, Math.round(fontSize * 0.16)) : boxX;
+  const headerHeight = usesDedicatedHeader ? Math.min(height * 0.34, boxY + boxHeight + boxY) : 0;
+  const imageMarkup = usesDedicatedHeader
+    ? `<rect width="${width}" height="${height}" fill="#FFFDFD"/><image href="${escapeHtml(backgroundImageUrl)}" x="0" y="${headerHeight}" width="${width}" height="${height - headerHeight}" preserveAspectRatio="xMidYMid slice"/><line x1="0" y1="${headerHeight}" x2="${width}" y2="${headerHeight}" stroke="${accent}" stroke-width="${Math.max(5, Math.round(fontSize * 0.08))}"/>`
+    : `<image href="${escapeHtml(backgroundImageUrl)}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" data-headline-placement="${usesDedicatedHeader ? "header" : placement}" data-headline-lines="${lines.length}">${imageMarkup}<rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${Math.round(fontSize * 0.18)}" fill="#FFFDFD" fill-opacity="${usesDedicatedHeader ? 1 : 0.93}"/><rect x="${accentX}" y="${boxY}" width="${Math.max(8, Math.round(fontSize * 0.16))}" height="${boxHeight}" rx="${Math.round(fontSize * 0.08)}" fill="${accent}"/>${lineMarkup}</svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 function buildHeadlineMarkup(lines, options) {
-  const { x, firstBaselineY, lineHeight, fontSize, anchor, fill } = options;
+  const { x, firstBaselineY, lineHeight, fontSize, anchor, fill, fontStyle = "bold_sans" } = options;
   if (!bundledCjkTypeface) {
     const spans = lines.map((line, index) => `<tspan x="${x}" y="${firstBaselineY + index * lineHeight}">${escapeHtml(line)}</tspan>`).join("");
     return `<text text-anchor="${anchor}" font-family="Noto Sans Hant" font-size="${fontSize}" font-weight="700" fill="${fill}">${spans}</text>`;
   }
 
-  const scale = fontSize / bundledCjkTypeface.unitsPerEm;
   return lines.map((line, index) => {
-    const run = bundledCjkTypeface.layout(line);
-    const totalAdvance = run.positions.reduce((sum, position) => sum + position.xAdvance, 0);
-    const startX = anchor === "middle" ? x - totalAdvance * scale / 2 : x;
-    let cursor = 0;
-    const paths = run.glyphs.map((glyph, glyphIndex) => {
-      const position = run.positions[glyphIndex];
-      const glyphX = cursor + position.xOffset;
-      const glyphY = position.yOffset;
-      cursor += position.xAdvance;
-      return `<path d="${glyph.path.toSVG()}" transform="translate(${formatSvgNumber(glyphX)} ${formatSvgNumber(glyphY)})"/>`;
+    const glyphLayout = layoutHeadlineGlyphs(line, fontStyle);
+    const startX = anchor === "middle" ? x - glyphLayout.widthEm * fontSize / 2 : x;
+    const paths = glyphLayout.glyphs.map(({ glyph, xEm, yEm, unitsPerEm }) => {
+      const scale = fontSize / unitsPerEm;
+      const glyphX = startX + xEm * fontSize;
+      const glyphY = firstBaselineY + index * lineHeight - yEm * fontSize;
+      return `<path d="${glyph.path.toSVG()}" transform="translate(${formatSvgNumber(glyphX)} ${formatSvgNumber(glyphY)}) scale(${formatSvgNumber(scale)} ${formatSvgNumber(-scale)})"/>`;
     }).join("");
     const baselineY = firstBaselineY + index * lineHeight;
-    return `<g fill="${fill}" transform="translate(${formatSvgNumber(startX)} ${formatSvgNumber(baselineY)}) scale(${formatSvgNumber(scale)} ${formatSvgNumber(-scale)})">${paths}</g>`;
+    return `<g fill="${fill}" data-font-style="${fontStyle}" data-baseline="${formatSvgNumber(baselineY)}">${paths}</g>`;
   }).join("");
+}
+
+function getTypefaceForCodePoint(fontStyle, codePoint) {
+  if (fontStyle !== "elegant_serif") {
+    return bundledTypefaces.get(fontStyle) || bundledCjkTypeface;
+  }
+  if (serifTypefaceCache.has(codePoint)) {
+    return serifTypefaceCache.get(codePoint);
+  }
+  const entry = serifUnicodeEntries.find(({ ranges }) => ranges.some(([start, end]) => codePoint >= start && codePoint <= end));
+  if (!entry || !serifFontRoot) {
+    serifTypefaceCache.set(codePoint, bundledCjkTypeface);
+    return bundledCjkTypeface;
+  }
+  const cacheKey = `subset:${entry.subset}`;
+  let typeface = serifTypefaceCache.get(cacheKey);
+  if (!typeface) {
+    try {
+      const buffer = fs.readFileSync(path.join(serifFontRoot, `noto-serif-tc-${entry.subset}-wght-normal.woff2`));
+      typeface = require("fontkit").create(buffer);
+      serifTypefaceCache.set(cacheKey, typeface);
+    } catch {
+      typeface = bundledCjkTypeface;
+    }
+  }
+  serifTypefaceCache.set(codePoint, typeface);
+  return typeface;
+}
+
+function layoutHeadlineGlyphs(value, fontStyle = "bold_sans") {
+  const resolvedFontStyle = CREATIVE_FONT_STYLES.has(fontStyle) && fontStyle !== "auto" ? fontStyle : "bold_sans";
+  const letterSpacingEm = resolvedFontStyle === "elegant_serif" ? 0.04 : resolvedFontStyle === "light_sans" ? 0.025 : 0;
+  const glyphs = [];
+  let cursorEm = 0;
+  for (const char of Array.from(String(value || ""))) {
+    const typeface = getTypefaceForCodePoint(resolvedFontStyle, char.codePointAt(0)) || bundledCjkTypeface;
+    if (!typeface) {
+      cursorEm += 1 + letterSpacingEm;
+      continue;
+    }
+    const run = typeface.layout(char);
+    let charAdvanceEm = 0;
+    run.glyphs.forEach((glyph, index) => {
+      const position = run.positions[index];
+      glyphs.push({
+        glyph,
+        unitsPerEm: typeface.unitsPerEm,
+        xEm: cursorEm + (charAdvanceEm + position.xOffset) / typeface.unitsPerEm,
+        yEm: position.yOffset / typeface.unitsPerEm
+      });
+      charAdvanceEm += position.xAdvance;
+    });
+    cursorEm += charAdvanceEm / typeface.unitsPerEm + letterSpacingEm;
+  }
+  return { glyphs, widthEm: Math.max(0, cursorEm - (glyphs.length ? letterSpacingEm : 0)) };
 }
 
 function formatSvgNumber(value) {
@@ -958,19 +1152,19 @@ async function rasterizeCreativeSvgDataUrl(dataUrl) {
   };
 }
 
-function wrapHeadlineByWidth(value, maxWidth, fontSize, maxLines) {
+function wrapHeadlineByWidth(value, maxWidth, fontSize, maxLines, fontStyle = "bold_sans") {
   const chars = Array.from(compactCreativeText(value));
   const lines = [];
   let truncated = false;
 
   while (chars.length && lines.length < maxLines) {
-    if (measureHeadlineWidth(chars.join(""), fontSize) <= maxWidth) {
+    if (measureHeadlineWidth(chars.join(""), fontSize, fontStyle) <= maxWidth) {
       lines.push(chars.splice(0).join("").trim());
       break;
     }
 
     let take = 0;
-    while (take < chars.length && measureHeadlineWidth(chars.slice(0, take + 1).join(""), fontSize) <= maxWidth) {
+    while (take < chars.length && measureHeadlineWidth(chars.slice(0, take + 1).join(""), fontSize, fontStyle) <= maxWidth) {
       take += 1;
     }
     take = Math.max(1, take);
@@ -979,7 +1173,7 @@ function wrapHeadlineByWidth(value, maxWidth, fontSize, maxLines) {
       const finalChars = chars.slice(0, take);
       truncated = take < chars.length;
       if (truncated) {
-        while (finalChars.length > 1 && measureHeadlineWidth(`${finalChars.join("")}…`, fontSize) > maxWidth) {
+        while (finalChars.length > 1 && measureHeadlineWidth(`${finalChars.join("")}…`, fontSize, fontStyle) > maxWidth) {
           finalChars.pop();
         }
         finalChars.push("…");
@@ -1015,12 +1209,13 @@ function fitHeadlineLayout(value, options) {
     preferredFontSize,
     minFontSize,
     maxLines,
+    fontStyle = "bold_sans",
     lineHeightRatio = 1.2
   } = options;
   let fallback = null;
 
   for (let fontSize = preferredFontSize; fontSize >= minFontSize; fontSize -= 2) {
-    const wrapped = wrapHeadlineByWidth(value, maxWidth, fontSize, maxLines);
+    const wrapped = wrapHeadlineByWidth(value, maxWidth, fontSize, maxLines, fontStyle);
     const lineHeight = Math.round(fontSize * lineHeightRatio);
     const blockHeight = lineHeight * wrapped.lines.length;
     const result = {
@@ -1028,7 +1223,8 @@ function fitHeadlineLayout(value, options) {
       fontSize,
       lineHeight,
       blockHeight,
-      lineWidths: wrapped.lines.map((line) => measureHeadlineWidth(line, fontSize))
+      fontStyle,
+      lineWidths: wrapped.lines.map((line) => measureHeadlineWidth(line, fontSize, fontStyle))
     };
     fallback = result;
     if (!wrapped.truncated && blockHeight <= maxHeight) {
@@ -1043,13 +1239,11 @@ function stableTextHash(value) {
   return Array.from(String(value || "")).reduce((hash, char) => ((hash * 31) + char.codePointAt(0)) >>> 0, 7);
 }
 
-function measureHeadlineWidth(value, fontSize) {
+function measureHeadlineWidth(value, fontSize, fontStyle = "bold_sans") {
   if (!bundledCjkTypeface) {
     return Array.from(String(value || "")).length * fontSize;
   }
-  const run = bundledCjkTypeface.layout(String(value || ""));
-  const advance = run.positions.reduce((sum, position) => sum + position.xAdvance, 0);
-  return advance * fontSize / bundledCjkTypeface.unitsPerEm;
+  return layoutHeadlineGlyphs(value, fontStyle).widthEm * fontSize;
 }
 
 function buildCreativeSvgDataUrl({ platformMeta, style, talent, productName, title, bodyText, cta }) {
@@ -1166,6 +1360,8 @@ module.exports = {
   getCreativeModelLabel,
   normalizeCreativeImageModel,
   normalizeCreativeAssetMode,
+  normalizeCreativeFontStyle,
+  resolveCreativeFontStyle,
   normalizeCreativePlatform,
   normalizeCreativeStyle,
   normalizeCreativeModel,
@@ -1174,5 +1370,6 @@ module.exports = {
   resolveCreativeTalentSelections,
   resolveCreativeImageModelConfig,
   resolveCreativeProviderConfig,
-  buildOpenRouterInputReferences
+  buildOpenRouterInputReferences,
+  selectHeadlinePlacement
 };

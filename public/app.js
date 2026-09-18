@@ -112,6 +112,14 @@ const CREATIVE_ASSET_MODE_META = {
   image_headline: "圖片＋標題"
 };
 
+const CREATIVE_FONT_STYLE_META = {
+  auto: "自動搭配",
+  bold_sans: "強力黑體",
+  clean_sans: "俐落黑體",
+  elegant_serif: "典雅明體",
+  light_sans: "輕盈黑體"
+};
+
 const CREATIVE_PROFILE_PRESETS = {
   warm_family_dinner_v1: {
     label: "家庭晚餐暖感版",
@@ -318,6 +326,7 @@ const creativePlatformButtons = Array.from(document.querySelectorAll("[data-crea
 const creativePrimaryCopy = document.querySelector("#creative-primary-copy");
 const creativeAssetModeInputs = Array.from(document.querySelectorAll("input[name='creative-asset-mode']"));
 const creativeHeadlineInput = document.querySelector("#creative-headline");
+const creativeFontStyleInput = document.querySelector("#creative-font-style");
 const creativeProfileInput = document.querySelector("#creative-profile");
 const creativeProfileNote = document.querySelector("#creative-profile-note");
 const creativeStyleInput = document.querySelector("#creative-style");
@@ -1335,6 +1344,9 @@ function normalizeRunState(run) {
           ? run.creative.config.assetMode
           : "standard",
         headline: String(run.creative.config.headline || "").trim(),
+        fontStyle: Object.hasOwn(CREATIVE_FONT_STYLE_META, run.creative.config.fontStyle)
+          ? run.creative.config.fontStyle
+          : "auto",
         style: run.creative.config.style || "clean",
         talent: run.creative.config.talent || run.creative.config.model || "none",
         variantSelections: normalizeCreativeSelectionRecord(run.creative.config.variantSelections),
@@ -1396,6 +1408,9 @@ function applyCreativeConfigToControls(config = null) {
   }
   if (creativeModelInput) {
     creativeModelInput.value = Object.hasOwn(CREATIVE_MODEL_META, talent) ? talent : "none";
+  }
+  if (creativeFontStyleInput) {
+    creativeFontStyleInput.value = Object.hasOwn(CREATIVE_FONT_STYLE_META, config?.fontStyle) ? config.fontStyle : "auto";
   }
   creativeAssetModeInputs.forEach((input) => {
     input.checked = input.value === assetMode;
@@ -1538,6 +1553,7 @@ function getCreativeConfig() {
     creativeProfile: String(creativeProfileInput?.value || "").trim(),
     assetMode: creativeAssetModeInputs.find((input) => input.checked)?.value || "standard",
     headline: String(creativeHeadlineInput?.value || currentRun?.outputs?.primary?.title || "").trim(),
+    fontStyle: String(creativeFontStyleInput?.value || "auto"),
     style: String(creativeStyleInput?.value || "clean"),
     talent: String(creativeModelInput?.value || "none"),
     variantSelections,
@@ -1618,7 +1634,7 @@ function buildCreativeRequest(platform = activeCreativePlatform, options = {}) {
 function getNextTextCardLayoutSeed(previousLayoutSeed) {
   const match = /^studio_(\d+)$/u.exec(String(previousLayoutSeed || ""));
   const previousIndex = match ? Number(match[1]) : -1;
-  return `studio_${(previousIndex + 1) % 4}`;
+  return `studio_${(previousIndex + 1) % 6}`;
 }
 
 function syncCurrentRunReferences(references = getCreativeReferences()) {
@@ -1691,7 +1707,8 @@ function getCreativeMetaText(asset) {
   const talentLabel = CREATIVE_MODEL_META[asset?.talent || asset?.model] || asset?.talent || asset?.model || "";
   const imageModelLabel = CREATIVE_IMAGE_MODEL_META[asset?.imageModel] || asset?.imageModel || "";
   const assetModeLabel = CREATIVE_ASSET_MODE_META[asset?.assetMode || currentRun?.creative?.config?.assetMode || "standard"] || "";
-  return [assetModeLabel, profileLabel, styleLabel, talentLabel, imageModelLabel, asset?.platformLabel].filter(Boolean).join("｜") || "尚未產出素材";
+  const fontStyleLabel = CREATIVE_FONT_STYLE_META[asset?.requestedFontStyle || currentRun?.creative?.config?.fontStyle || "auto"] || "";
+  return [assetModeLabel, fontStyleLabel, profileLabel, styleLabel, talentLabel, imageModelLabel, asset?.platformLabel].filter(Boolean).join("｜") || "尚未產出素材";
 }
 
 function findFirstNumber(value) {
@@ -1868,6 +1885,7 @@ function creativeConfigMatchesStored(config) {
     stored.creativeProfile === String(config.creativeProfile || "") &&
     (stored.assetMode || "standard") === (config.assetMode || "standard") &&
     String(stored.headline || "") === String(config.headline || "") &&
+    (stored.fontStyle || "auto") === (config.fontStyle || "auto") &&
     stored.style === config.style &&
     stored.talent === config.talent &&
     JSON.stringify(storedVariantSelections) === JSON.stringify(nextVariantSelections) &&
@@ -2908,7 +2926,7 @@ creativeModelInput?.addEventListener("change", () => {
   }
 });
 
-[creativeCompositionInput, creativeBackgroundInput, creativeFramingInput, creativeStylingInput]
+[creativeFontStyleInput, creativeCompositionInput, creativeBackgroundInput, creativeFramingInput, creativeStylingInput]
   .filter(Boolean)
   .forEach((input) => {
     input.addEventListener("change", () => {

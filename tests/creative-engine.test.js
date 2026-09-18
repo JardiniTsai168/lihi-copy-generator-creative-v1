@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const creativeEngine = require("../creative-engine");
+const sharp = require("sharp");
 
 test("creative engine exposes the remaining image model label", () => {
   assert.equal(
@@ -127,6 +128,56 @@ test("Creative Studio request nonces produce different text-card designs", async
   assert.equal(new Set(imageUrls).size, 2);
 });
 
+test("text cards support selectable portable Traditional Chinese font styles", async () => {
+  const assets = await Promise.all(["bold_sans", "elegant_serif", "light_sans"].map((fontStyle) =>
+    creativeEngine.generateCreativeAsset({
+      productName: "LIHI 簡訊",
+      platform: "facebook",
+      source: { title: "拒絕無效發送" },
+      config: { assetMode: "text_card", headline: "拒絕無效發送", fontStyle, layoutSeed: "font-test" }
+    })
+  ));
+
+  assert.deepEqual(assets.map((asset) => asset.fontStyle), ["bold_sans", "elegant_serif", "light_sans"]);
+  assert.equal(new Set(assets.map((asset) => asset.imageUrl)).size, 3);
+  assert.ok(creativeEngine.measureHeadlineWidth("拒絕無效發送", 72, "elegant_serif") > 0);
+});
+
+test("image headline always fits into at most two lines", () => {
+  const asset = creativeEngine.buildCreativeAsset({
+    productName: "LIHI 簡訊",
+    platform: "facebook",
+    source: { title: "拒絕無效發送，讓每一封簡訊都具備行銷實質效益" },
+    config: { assetMode: "image_headline", talent: "adult", fontStyle: "bold_sans" }
+  });
+  const svg = decodeURIComponent(asset.imageUrl.split(",").slice(1).join(","));
+  assert.match(svg, /data-headline-lines="[12]"/);
+  assert.match(svg, /data-headline-placement="header"/);
+  assert.doesNotMatch(svg, /data-headline-lines="[3-9]"/);
+});
+
+test("image headline safety analysis chooses the quieter side", async () => {
+  const width = 600;
+  const height = 600;
+  const noisyRight = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = (y * width + x) * 3;
+      const value = x < width / 2 ? 238 : ((Math.floor(x / 6) + Math.floor(y / 6)) % 2 ? 5 : 250);
+      noisyRight[index] = value;
+      noisyRight[index + 1] = value;
+      noisyRight[index + 2] = value;
+    }
+  }
+  const png = await sharp(noisyRight, { raw: { width, height, channels: 3 } }).png().toBuffer();
+  const result = await creativeEngine.selectHeadlinePlacement(`data:image/png;base64,${png.toString("base64")}`, {
+    headlinePlacement: "right",
+    platformMeta: { width, height }
+  });
+  assert.equal(result.placement, "left");
+  assert.ok(result.scores.left < result.scores.right);
+});
+
 test("image headline mode asks for a text-free background and overlays the supplied headline", async () => {
   let capturedPrompt = "";
   const asset = await creativeEngine.generateCreativeAsset(
@@ -158,7 +209,7 @@ test("image headline mode asks for a text-free background and overlays the suppl
   );
 
   assert.match(capturedPrompt, /背景圖內不要出現任何文字/);
-  assert.match(capturedPrompt, /保留乾淨、低細節的安全區/);
+  assert.match(capturedPrompt, /保留.*乾淨、低細節安全區/);
   assert.equal(asset.assetMode, "image_headline");
   assert.equal(asset.headline, "不要再讓客人輸入長密碼");
   assert.equal(asset.mimeType, "image/png");
